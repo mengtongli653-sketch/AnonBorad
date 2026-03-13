@@ -15,6 +15,7 @@ interface Comment {
   likes: number
   reports: number
   created_at: string
+  category: string
 }
 
 interface Translations {
@@ -68,13 +69,20 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [showAdminModal, setShowAdminModal] = useState(false)
   const [adminPassword, setAdminPassword] = useState('')
+  const [currentFilter, setCurrentFilter] = useState('全部')
+  const [selectedCategory, setSelectedCategory] = useState('生活')
   const t = translations[language]
 
   const loadComments = useCallback(async () => {
-    const { data, error } = await supabase
+    let query = supabase
       .from('comments')
       .select('*')
-      .order('created_at', { ascending: false })
+
+    if (currentFilter !== '全部') {
+      query = query.eq('category', currentFilter)
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false })
 
     if (error) {
       console.error('Error loading comments:', error)
@@ -82,7 +90,7 @@ export default function Home() {
     }
 
     setComments(data || [])
-  }, [])
+  }, [currentFilter])
 
   useEffect(() => {
     loadComments()
@@ -91,15 +99,22 @@ export default function Home() {
   useEffect(() => {
     const subscription = supabase
       .channel('public:comments')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => {
-        loadComments()
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newComment = payload.new as Comment
+          if (currentFilter === '全部' || newComment.category === currentFilter) {
+            loadComments()
+          }
+        } else {
+          loadComments()
+        }
       })
       .subscribe()
 
     return () => {
       supabase.removeChannel(subscription)
     }
-  }, [loadComments])
+  }, [loadComments, currentFilter])
 
   const calculateHotScore = (comment: Comment) => {
     const now = new Date()
@@ -139,7 +154,7 @@ export default function Home() {
 
     const { error } = await supabase
       .from('comments')
-      .insert([{ content: newComment }])
+      .insert([{ content: newComment, category: selectedCategory }])
 
     if (error) {
       console.error('Error publishing comment:', error)
@@ -231,21 +246,48 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+            {['全部', '生活', '技术', '树洞'].map((category) => (
+              <button
+                key={category}
+                onClick={() => setCurrentFilter(category)}
+                className={`glass px-4 py-2 rounded-lg text-white transition-colors ${currentFilter === category ? 'bg-white/30' : 'hover:bg-white/20'}`}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-4">
             <input
               type="text"
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               placeholder={t.placeholder}
-              className="flex-1 px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
+              className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
             />
-            <button
-              onClick={handlePublish}
-              className="glass px-6 py-3 rounded-lg text-white hover:bg-white/20 transition-colors flex items-center gap-2"
-            >
-              <Send size={20} />
-              {t.publish}
-            </button>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="block text-white/70 text-sm mb-1">标签</label>
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="w-full px-4 py-2 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
+                >
+                  <option value="生活">生活</option>
+                  <option value="技术">技术</option>
+                  <option value="树洞">树洞</option>
+                  <option value="其他">其他</option>
+                </select>
+              </div>
+              <button
+                onClick={handlePublish}
+                className="glass px-6 py-3 rounded-lg text-white hover:bg-white/20 transition-colors flex items-center gap-2 self-end"
+              >
+                <Send size={20} />
+                {t.publish}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -255,6 +297,11 @@ export default function Home() {
               key={comment.id}
               className={`glass rounded-2xl p-6 transition-all duration-300 ${isControversial(comment) ? 'opacity-50' : ''}`}
             >
+              <div className="flex justify-between items-start mb-4">
+                <span className="glass px-3 py-1 rounded-full text-white text-sm">{comment.category}</span>
+                <span className="text-white/70 text-sm">{getRelativeTime(comment.created_at)}</span>
+              </div>
+              
               <p className={`text-white mb-4 ${isControversial(comment) ? 'blur-sm' : ''}`}>
                 {comment.content}
               </p>
@@ -266,9 +313,7 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="flex justify-between items-center">
-                <span className="text-white/70 text-sm">{getRelativeTime(comment.created_at)}</span>
-
+              <div className="flex justify-end items-center">
                 <div className="flex gap-4">
                   <button
                     onClick={() => handleLike(comment.id)}
