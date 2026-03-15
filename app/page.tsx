@@ -71,6 +71,8 @@ export default function Home() {
   const [adminPassword, setAdminPassword] = useState('')
   const [currentFilter, setCurrentFilter] = useState('全部')
   const [selectedCategory, setSelectedCategory] = useState('生活')
+  const [allCategories, setAllCategories] = useState<string[]>([])
+  const [customCategory, setCustomCategory] = useState('')
   const t = translations[language]
 
   const loadComments = useCallback(async () => {
@@ -95,6 +97,23 @@ export default function Home() {
   useEffect(() => {
     loadComments()
   }, [loadComments])
+
+  useEffect(() => {
+    const loadCategories = async () => {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('name')
+
+      if (error) {
+        console.error('Error loading categories:', error)
+        return
+      }
+
+      setAllCategories(data?.map(item => item.name) || [])
+    }
+
+    loadCategories()
+  }, [])
 
   useEffect(() => {
     const subscription = supabase
@@ -152,9 +171,40 @@ export default function Home() {
   const handlePublish = async () => {
     if (!newComment.trim()) return
 
+    let finalCategory = selectedCategory
+
+    // 处理自定义标签
+    if (selectedCategory === '自定义新标签' && customCategory.trim()) {
+      finalCategory = customCategory.trim()
+      
+      // 检查标签是否已存在
+      const { data: existingCategories } = await supabase
+        .from('categories')
+        .select('name')
+        .eq('name', finalCategory)
+
+      if (!existingCategories || existingCategories.length === 0) {
+        // 插入新标签
+        const { error: categoryError } = await supabase
+          .from('categories')
+          .insert([{ name: finalCategory }])
+
+        if (categoryError) {
+          console.error('Error creating new category:', categoryError)
+          return
+        }
+
+        // 重新加载标签列表
+        const { data: updatedCategories } = await supabase
+          .from('categories')
+          .select('name')
+        setAllCategories(updatedCategories?.map(item => item.name) || [])
+      }
+    }
+
     const { error } = await supabase
       .from('comments')
-      .insert([{ content: newComment, category: selectedCategory }])
+      .insert([{ content: newComment, category: finalCategory }])
 
     if (error) {
       console.error('Error publishing comment:', error)
@@ -162,6 +212,7 @@ export default function Home() {
     }
 
     setNewComment('')
+    setCustomCategory('')
     loadComments()
   }
 
@@ -247,7 +298,14 @@ export default function Home() {
           </div>
 
           <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-            {['全部', '生活', '技术', '树洞'].map((category) => (
+            <button
+              key="全部"
+              onClick={() => setCurrentFilter('全部')}
+              className={`glass px-4 py-2 rounded-lg text-white transition-colors ${currentFilter === '全部' ? 'bg-white/30' : 'hover:bg-white/20'}`}
+            >
+              全部
+            </button>
+            {allCategories.map((category) => (
               <button
                 key={category}
                 onClick={() => setCurrentFilter(category)}
@@ -272,13 +330,22 @@ export default function Home() {
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-4 py-2 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
+                  className="w-full px-4 py-2 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-white/50 mb-2"
                 >
-                  <option value="生活">生活</option>
-                  <option value="技术">技术</option>
-                  <option value="树洞">树洞</option>
-                  <option value="其他">其他</option>
+                  {allCategories.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                  <option value="自定义新标签">+ 自定义新标签</option>
                 </select>
+                {selectedCategory === '自定义新标签' && (
+                  <input
+                    type="text"
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value)}
+                    placeholder="请输入新标签名"
+                    className="w-full px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
+                  />
+                )}
               </div>
               <button
                 onClick={handlePublish}
