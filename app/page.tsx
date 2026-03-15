@@ -70,16 +70,33 @@ export default function Home() {
   const [showAdminModal, setShowAdminModal] = useState(false)
   const [adminPassword, setAdminPassword] = useState('')
   const [currentFilter, setCurrentFilter] = useState('全部')
-  const [selectedCategory, setSelectedCategory] = useState('生活')
-  // ── 屏蔽词状态 ──
+  const [selectedCategory, setSelectedCategory] = useState('')
   const [badWords, setBadWords] = useState<string[]>([])
+  // ── 动态标签状态 ──
+  const [allCategories, setAllCategories] = useState<string[]>([])
   const t = translations[language]
+
+  // ── 获取标签列表 ──
+  const loadCategories = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('name')
+      .order('created_at', { ascending: true })
+    if (error) {
+      console.error('Error loading categories:', error)
+      return
+    }
+    const names = (data || []).map((row: { name: string }) => row.name)
+    setAllCategories(names)
+    // 如果当前 selectedCategory 还没选，默认选第一个
+    if (names.length > 0 && !selectedCategory) {
+      setSelectedCategory(names[0])
+    }
+  }, [selectedCategory])
 
   // ── 获取屏蔽词库 ──
   const loadBadWords = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('sensitive_words')
-      .select('word')
+    const { data, error } = await supabase.from('sensitive_words').select('word')
     if (error) {
       console.error('Error loading sensitive words:', error)
       return
@@ -100,11 +117,12 @@ export default function Home() {
     setComments(data || [])
   }, [currentFilter])
 
-  // ── 初始化：同时拉取留言和屏蔽词 ──
+  // ── 初始化 ──
   useEffect(() => {
     loadComments()
     loadBadWords()
-  }, [loadComments, loadBadWords])
+    loadCategories()
+  }, [loadComments, loadBadWords, loadCategories])
 
   // ── 留言实时订阅 ──
   useEffect(() => {
@@ -121,9 +139,7 @@ export default function Home() {
         }
       })
       .subscribe()
-    return () => {
-      supabase.removeChannel(subscription)
-    }
+    return () => { supabase.removeChannel(subscription) }
   }, [loadComments, currentFilter])
 
   // ── 屏蔽词实时订阅 ──
@@ -134,10 +150,19 @@ export default function Home() {
         loadBadWords()
       })
       .subscribe()
-    return () => {
-      supabase.removeChannel(subscription)
-    }
+    return () => { supabase.removeChannel(subscription) }
   }, [loadBadWords])
+
+  // ── 标签实时订阅 ──
+  useEffect(() => {
+    const subscription = supabase
+      .channel('public:categories')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
+        loadCategories()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(subscription) }
+  }, [loadCategories])
 
   const calculateHotScore = (comment: Comment) => {
     const now = new Date()
@@ -171,6 +196,23 @@ export default function Home() {
     return comment.reports / (comment.likes || 1) > 0.5 && comment.reports > 5
   }
 
+  // ── 处理下拉框选择（含新建标签逻辑）──
+  const handleCategoryChange = (value: string) => {
+    if (value === '__new__') {
+      const input = prompt('请输入新标签名：')
+      if (!input || !input.trim()) return
+      const trimmed = input.trim()
+      if (allCategories.includes(trimmed)) {
+        setSelectedCategory(trimmed)
+      } else {
+        // 先乐观更新本地，发布时再写入 DB
+        setSelectedCategory(trimmed)
+      }
+    } else {
+      setSelectedCategory(value)
+    }
+  }
+
   const handlePublish = async () => {
     if (!newComment.trim()) return
 
@@ -182,9 +224,30 @@ export default function Home() {
       return
     }
 
+    const category = selectedCategory.trim()
+    if (!category) {
+      alert('请选择或创建一个标签')
+      return
+    }
+
+    // ── 如果是新标签，先写入 categories 表 ──
+    if (!allCategories.includes(category)) {
+      const { error: catError } = await supabase
+        .from('categories')
+        .insert([{ name: category }])
+      if (catError && catError.code !== '23505') {
+        // 23505 = unique violation，说明已存在，忽略
+        console.error('Error creating category:', catError)
+        return
+      }
+      // 刷新标签列表
+      await loadCategories()
+    }
+
+    // ── 发布留言 ──
     const { error } = await supabase
       .from('comments')
-      .insert([{ content: newComment, category: selectedCategory }])
+      .insert([{ content: newComment, category }])
     if (error) {
       console.error('Error publishing comment:', error)
       return
@@ -272,9 +335,20 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Category Filter */}
+        {/* Category Filter — 动态渲染 */}
         <div className="glass rounded-2xl p-4 mb-4 flex gap-2 flex-wrap">
-          {['全部', '生活', '技术', '树洞'].map((category) => (
+          {/* 全部 始终显示 */}
+          <button
+            onClick={() => setCurrentFilter('全部')}
+            className={`px-4 py-2 rounded-lg text-white transition-colors ${
+              currentFilter === '全部'
+                ? 'bg-blue-500/50 border border-blue-300/50'
+                : 'glass hover:bg-white/20'
+            }`}
+          >
+            全部
+          </button>
+          {allCategories.map((category) => (
             <button
               key={category}
               onClick={() => setCurrentFilter(category)}
@@ -302,13 +376,21 @@ export default function Home() {
             <div className="flex-1">
               <select
                 value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
+                onChange={(e) => handleCategoryChange(e.target.value)}
                 className="w-full px-4 py-2 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-300"
               >
-                <option value="生活" className="text-gray-800">生活</option>
-                <option value="技术" className="text-gray-800">技术</option>
-                <option value="树洞" className="text-gray-800">树洞</option>
-                <option value="其他" className="text-gray-800">其他</option>
+                {/* 如果 selectedCategory 是新建的（不在列表里），单独显示 */}
+                {selectedCategory && !allCategories.includes(selectedCategory) && (
+                  <option value={selectedCategory} className="text-gray-800">
+                    {selectedCategory}
+                  </option>
+                )}
+                {allCategories.map((cat) => (
+                  <option key={cat} value={cat} className="text-gray-800">
+                    {cat}
+                  </option>
+                ))}
+                <option value="__new__" className="text-gray-400">＋ 新建标签</option>
               </select>
             </div>
             <button
