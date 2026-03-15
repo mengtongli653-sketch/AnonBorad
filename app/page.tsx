@@ -59,13 +59,27 @@ export default function Home() {
   const [allCategories, setAllCategories] = useState<string[]>([])
   const [showNewCategoryModal, setShowNewCategoryModal] = useState(false)
   const [newCategoryInput, setNewCategoryInput] = useState('')
-  // ── 新功能状态 ──
   const [isDark, setIsDark] = useState(true)
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
   const [replyContent, setReplyContent] = useState('')
   const [lastSubmission, setLastSubmission] = useState<{ content: string; time: number } | null>(null)
   const [showHeatmap, setShowHeatmap] = useState(false)
+  // ── 已点赞/已举报状态（同步 localStorage）──
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set())
+  const [reportedIds, setReportedIds] = useState<Set<string>>(new Set())
   const t = translations[language]
+
+  // ── 初始化：从 localStorage 恢复点赞/举报记录 ──
+  useEffect(() => {
+    const liked = Object.keys(localStorage)
+      .filter(k => k.startsWith('liked_'))
+      .map(k => k.replace('liked_', ''))
+    const reported = Object.keys(localStorage)
+      .filter(k => k.startsWith('reported_'))
+      .map(k => k.replace('reported_', ''))
+    setLikedIds(new Set(liked))
+    setReportedIds(new Set(reported))
+  }, [])
 
   // ── 主题配置 ──
   const th = isDark ? {
@@ -90,7 +104,6 @@ export default function Home() {
     heatEmpty: 'bg-blue-100', heat1: 'bg-blue-200', heat2: 'bg-blue-400', heat3: 'bg-blue-600',
   }
 
-  // ── 数据加载 ──
   const loadCategories = useCallback(async () => {
     const { data, error } = await supabase.from('categories').select('name').order('created_at', { ascending: true })
     if (error) { console.error('Error loading categories:', error); return }
@@ -104,7 +117,6 @@ export default function Home() {
     setBadWords((data || []).map((row: { word: string }) => row.word))
   }, [])
 
-  // 加载所有留言（含回复），客户端过滤
   const loadComments = useCallback(async () => {
     const { data, error } = await supabase.from('comments').select('*').order('created_at', { ascending: false })
     if (error) { console.error('Error loading comments:', error); return }
@@ -134,7 +146,6 @@ export default function Home() {
     return () => { supabase.removeChannel(sub) }
   }, [loadCategories])
 
-  // ── 工具函数 ──
   const calculateHotScore = (c: Comment) => {
     const hoursAgo = (Date.now() - new Date(c.created_at).getTime()) / 3600000
     return (c.likes + c.reports * 0.5) / (hoursAgo + 2)
@@ -165,17 +176,13 @@ export default function Home() {
 
   const isControversial = (c: Comment) => c.reports / (c.likes || 1) > 0.5 && c.reports > 5
 
-  // ── 热力图数据 ──
-  const getHeatmapData = () => {
-    const days = 35
-    return Array.from({ length: days }, (_, i) => {
+  const getHeatmapData = () =>
+    Array.from({ length: 35 }, (_, i) => {
       const d = new Date()
-      d.setDate(d.getDate() - (days - 1 - i))
+      d.setDate(d.getDate() - (34 - i))
       const dateStr = d.toISOString().split('T')[0]
-      const count = comments.filter(c => c.created_at.startsWith(dateStr)).length
-      return { dateStr, count }
+      return { dateStr, count: comments.filter(c => c.created_at.startsWith(dateStr)).length }
     })
-  }
 
   const heatColor = (count: number) => {
     if (count === 0) return th.heatEmpty
@@ -184,7 +191,6 @@ export default function Home() {
     return th.heat3
   }
 
-  // ── 操作函数 ──
   const handleCategoryChange = (value: string) => {
     if (value === '__new__') { setNewCategoryInput(''); setShowNewCategoryModal(true) }
     else setSelectedCategory(value)
@@ -200,12 +206,10 @@ export default function Home() {
 
   const handlePublish = async () => {
     if (!newComment.trim() || newComment.length > MAX_CHARS) return
-    // 防重复
     const now = Date.now()
     if (lastSubmission && lastSubmission.content === newComment.trim() && now - lastSubmission.time < ANTI_SPAM_MS) {
       alert('请勿在60秒内重复发送相同内容'); return
     }
-    // 屏蔽词
     const hitWord = badWords.find(w => newComment.toLowerCase().includes(w.toLowerCase()))
     if (hitWord) { alert('内容包含违禁词，请文明发言'); return }
     const category = selectedCategory.trim()
@@ -236,18 +240,39 @@ export default function Home() {
     loadComments()
   }
 
+  // ── 防刷：localStorage 记录 ──
+  const handleLike = async (id: string) => {
+    const key = `liked_${id}`
+    if (localStorage.getItem(key)) {
+      alert('你已经点过赞了'); return
+    }
+    await supabase.from('comments')
+      .update({ likes: (comments.find(c => c.id === id)?.likes || 0) + 1 })
+      .eq('id', id)
+    localStorage.setItem(key, '1')
+    setLikedIds(prev => new Set([...prev, id]))
+  }
+
+  const handleReport = async (id: string) => {
+    const key = `reported_${id}`
+    if (localStorage.getItem(key)) {
+      alert('你已经举报过了'); return
+    }
+    await supabase.from('comments')
+      .update({ reports: (comments.find(c => c.id === id)?.reports || 0) + 1 })
+      .eq('id', id)
+    localStorage.setItem(key, '1')
+    setReportedIds(prev => new Set([...prev, id]))
+  }
+
   const handlePin = async (id: string, pinned: boolean) => {
     await supabase.from('comments').update({ pinned: !pinned }).eq('id', id)
   }
-  const handleLike = async (id: string) => {
-    await supabase.from('comments').update({ likes: (comments.find(c => c.id === id)?.likes || 0) + 1 }).eq('id', id)
-  }
-  const handleReport = async (id: string) => {
-    await supabase.from('comments').update({ reports: (comments.find(c => c.id === id)?.reports || 0) + 1 }).eq('id', id)
-  }
+
   const handleDelete = async (id: string) => {
     await supabase.from('comments').delete().eq('id', id)
   }
+
   const handleAdminLogin = () => {
     if (adminPassword === 'anon123') { setIsAdmin(true); setShowAdminModal(false) }
     setAdminPassword('')
@@ -310,10 +335,8 @@ export default function Home() {
             </div>
             <div className={`flex items-center gap-2 mt-2 text-xs ${th.textMuted}`}>
               <span>少</span>
-              <div className={`w-4 h-4 rounded ${th.heatEmpty}`} />
-              <div className={`w-4 h-4 rounded ${th.heat1}`} />
-              <div className={`w-4 h-4 rounded ${th.heat2}`} />
-              <div className={`w-4 h-4 rounded ${th.heat3}`} />
+              <div className={`w-4 h-4 rounded ${th.heatEmpty}`} /><div className={`w-4 h-4 rounded ${th.heat1}`} />
+              <div className={`w-4 h-4 rounded ${th.heat2}`} /><div className={`w-4 h-4 rounded ${th.heat3}`} />
               <span>多</span>
             </div>
           </div>
@@ -324,8 +347,7 @@ export default function Home() {
           {['全部', ...allCategories].map((cat) => (
             <button key={cat} onClick={() => setCurrentFilter(cat)}
               className={`px-4 py-2 rounded-lg transition-colors ${currentFilter === cat ? th.activeBtn : th.inactBtn}`}>
-              {cat}
-              <span className={`ml-1 text-xs opacity-60`}>({getCategoryCount(cat)})</span>
+              {cat}<span className="ml-1 text-xs opacity-60">({getCategoryCount(cat)})</span>
             </button>
           ))}
         </div>
@@ -333,14 +355,9 @@ export default function Home() {
         {/* Input Area */}
         <div className={`${th.glass} rounded-2xl p-5 mb-6`}>
           <div className="relative mb-3">
-            <textarea
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              placeholder={t.placeholder}
-              rows={3}
-              maxLength={MAX_CHARS}
-              className={`w-full px-4 py-3 rounded-lg ${th.input} focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none`}
-            />
+            <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)}
+              placeholder={t.placeholder} rows={3} maxLength={MAX_CHARS}
+              className={`w-full px-4 py-3 rounded-lg ${th.input} focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none`} />
             <span className={`absolute bottom-2 right-3 text-xs ${newComment.length > MAX_CHARS * 0.9 ? 'text-red-400' : th.textMuted}`}>
               {newComment.length}/{MAX_CHARS}
             </span>
@@ -369,7 +386,6 @@ export default function Home() {
         <div className="space-y-3">
           {topLevelComments.map((comment) => (
             <div key={comment.id}>
-              {/* 主留言 */}
               <div className={`${th.glass} rounded-xl p-4 border ${comment.pinned ? 'border-yellow-400/50' : 'border-blue-300/20 hover:border-blue-300/40'} transition-all`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -387,17 +403,19 @@ export default function Home() {
                   </div>
                 )}
                 <div className={`flex items-center gap-4 pt-2 border-t ${th.divider}`}>
-                  <button onClick={() => handleLike(comment.id)} className={`${th.text} hover:text-blue-300 transition-colors flex items-center gap-1 text-sm`}>
+                  <button onClick={() => handleLike(comment.id)}
+                    className={`transition-colors flex items-center gap-1 text-sm ${likedIds.has(comment.id) ? 'text-blue-400 cursor-default' : `${th.text} hover:text-blue-300`}`}>
                     <ThumbsUp size={14} />{comment.likes}
+                    {likedIds.has(comment.id) && <span className="text-xs opacity-60">✓</span>}
                   </button>
-                  <button onClick={() => handleReport(comment.id)} className={`${th.text} hover:text-red-300 transition-colors flex items-center gap-1 text-sm`}>
+                  <button onClick={() => handleReport(comment.id)}
+                    className={`transition-colors flex items-center gap-1 text-sm ${reportedIds.has(comment.id) ? 'text-red-400 cursor-default' : `${th.text} hover:text-red-300`}`}>
                     <AlertTriangle size={14} />{comment.reports}
+                    {reportedIds.has(comment.id) && <span className="text-xs opacity-60">✓</span>}
                   </button>
-                  <button
-                    onClick={() => setReplyingTo(replyingTo === comment.id ? null : comment.id)}
+                  <button onClick={() => setReplyingTo(replyingTo === comment.id ? null : comment.id)}
                     className={`${th.text} hover:text-blue-300 transition-colors flex items-center gap-1 text-sm`}>
-                    <MessageCircle size={14} />
-                    回复 {getReplies(comment.id).length > 0 && `(${getReplies(comment.id).length})`}
+                    <MessageCircle size={14} />回复{getReplies(comment.id).length > 0 && ` (${getReplies(comment.id).length})`}
                   </button>
                   {isAdmin && (
                     <div className="ml-auto flex items-center gap-2">
@@ -423,8 +441,10 @@ export default function Home() {
                       </div>
                       <p className={`${th.text} text-sm leading-relaxed`}>{reply.content}</p>
                       <div className={`flex items-center gap-3 pt-2 border-t ${th.divider} mt-2`}>
-                        <button onClick={() => handleLike(reply.id)} className={`${th.text} hover:text-blue-300 transition-colors flex items-center gap-1 text-xs`}>
+                        <button onClick={() => handleLike(reply.id)}
+                          className={`transition-colors flex items-center gap-1 text-xs ${likedIds.has(reply.id) ? 'text-blue-400 cursor-default' : `${th.text} hover:text-blue-300`}`}>
                           <ThumbsUp size={12} />{reply.likes}
+                          {likedIds.has(reply.id) && <span className="opacity-60">✓</span>}
                         </button>
                         {isAdmin && (
                           <button onClick={() => handleDelete(reply.id)} className={`${th.text} hover:text-red-300 transition-colors flex items-center gap-1 text-xs ml-auto`}>
@@ -442,24 +462,16 @@ export default function Home() {
                 <div className="ml-6 mt-1">
                   <div className={`${th.glass} rounded-xl p-3`}>
                     <div className="relative mb-2">
-                      <textarea
-                        value={replyContent}
-                        onChange={(e) => setReplyContent(e.target.value)}
-                        placeholder="输入回复内容..."
-                        rows={2}
-                        maxLength={MAX_CHARS}
-                        autoFocus
-                        className={`w-full px-3 py-2 rounded-lg ${th.input} focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none text-sm`}
-                      />
+                      <textarea value={replyContent} onChange={(e) => setReplyContent(e.target.value)}
+                        placeholder="输入回复内容..." rows={2} maxLength={MAX_CHARS} autoFocus
+                        className={`w-full px-3 py-2 rounded-lg ${th.input} focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none text-sm`} />
                       <span className={`absolute bottom-2 right-3 text-xs ${th.textMuted}`}>
                         {replyContent.length}/{MAX_CHARS}
                       </span>
                     </div>
                     <div className="flex gap-2 justify-end">
                       <button onClick={() => { setReplyingTo(null); setReplyContent('') }}
-                        className={`${th.glass} px-3 py-1 rounded-lg ${th.text} hover:bg-white/20 text-sm transition-colors`}>
-                        取消
-                      </button>
+                        className={`${th.glass} px-3 py-1 rounded-lg ${th.text} hover:bg-white/20 text-sm transition-colors`}>取消</button>
                       <button onClick={() => handleReply(comment.id)} disabled={replyContent.length > MAX_CHARS}
                         className="bg-blue-500 hover:bg-blue-400 disabled:opacity-40 px-4 py-1 rounded-lg text-white text-sm font-medium transition-colors flex items-center gap-1">
                         <Send size={12} />发送
