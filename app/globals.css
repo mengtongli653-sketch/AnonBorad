@@ -14,7 +14,6 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 60%, #0ea5e9 100%);
   min-height: 100vh;
 }
 
@@ -24,4 +23,12 @@ body {
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(147, 197, 253, 0.3);
   box-shadow: 0 4px 24px rgba(30, 58, 138, 0.15);
+}
+
+.glass-light {
+  background: rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  box-shadow: 0 4px 24px rgba(30, 58, 138, 0.08);
 }

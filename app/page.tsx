@@ -2,12 +2,18 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { Languages, ThumbsUp, AlertTriangle, Trash2, Clock, Flame, Send, X } from 'lucide-react'
+import {
+  Languages, ThumbsUp, AlertTriangle, Trash2, Clock, Flame,
+  Send, X, Pin, PinOff, MessageCircle, Sun, Moon, BarChart2
+} from 'lucide-react'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 )
+
+const MAX_CHARS = 200
+const ANTI_SPAM_MS = 60000
 
 interface Comment {
   id: string
@@ -16,48 +22,26 @@ interface Comment {
   reports: number
   created_at: string
   category: string
+  pinned: boolean
+  parent_id: string | null
 }
 
 interface Translations {
-  title: string
-  placeholder: string
-  publish: string
-  timeSort: string
-  hotSort: string
-  likes: string
-  reports: string
-  delete: string
-  admin: string
-  controversial: string
-  noComments: string
+  title: string; placeholder: string; publish: string
+  timeSort: string; hotSort: string; likes: string; reports: string
+  delete: string; admin: string; controversial: string; noComments: string
 }
 
 const translations: Record<string, Translations> = {
   zh: {
-    title: '匿名留言板',
-    placeholder: '请输入留言内容...',
-    publish: '发布',
-    timeSort: '时间排序',
-    hotSort: '热度排序',
-    likes: '点赞',
-    reports: '举报',
-    delete: '删除',
-    admin: '管理员',
-    controversial: '内容争议',
-    noComments: '暂无留言',
+    title: '匿名留言板', placeholder: '请输入留言内容...', publish: '发布',
+    timeSort: '时间排序', hotSort: '热度排序', likes: '点赞', reports: '举报',
+    delete: '删除', admin: '管理员', controversial: '内容争议', noComments: '暂无留言',
   },
   en: {
-    title: '匿名留言板',
-    placeholder: 'Enter your message...',
-    publish: 'Publish',
-    timeSort: 'Time Sort',
-    hotSort: 'Hot Sort',
-    likes: 'Likes',
-    reports: 'Reports',
-    delete: 'Delete',
-    admin: 'Admin',
-    controversial: 'Controversial Content',
-    noComments: 'No comments yet',
+    title: '匿名留言板', placeholder: 'Enter your message...', publish: 'Publish',
+    timeSort: 'Time Sort', hotSort: 'Hot Sort', likes: 'Likes', reports: 'Reports',
+    delete: 'Delete', admin: 'Admin', controversial: 'Controversial Content', noComments: 'No comments yet',
   },
 }
 
@@ -75,107 +59,135 @@ export default function Home() {
   const [allCategories, setAllCategories] = useState<string[]>([])
   const [showNewCategoryModal, setShowNewCategoryModal] = useState(false)
   const [newCategoryInput, setNewCategoryInput] = useState('')
+  // ── 新功能状态 ──
+  const [isDark, setIsDark] = useState(true)
+  const [replyingTo, setReplyingTo] = useState<string | null>(null)
+  const [replyContent, setReplyContent] = useState('')
+  const [lastSubmission, setLastSubmission] = useState<{ content: string; time: number } | null>(null)
+  const [showHeatmap, setShowHeatmap] = useState(false)
   const t = translations[language]
 
+  // ── 主题配置 ──
+  const th = isDark ? {
+    bg: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 60%, #0ea5e9 100%)',
+    text: 'text-white', textSub: 'text-white/70', textMuted: 'text-white/50',
+    glass: 'glass', input: 'bg-white/20 text-white placeholder-white/50',
+    select: 'bg-white/20 text-white',
+    badge: 'bg-blue-500/30 text-blue-100 border-blue-400/30',
+    activeBtn: 'bg-blue-500/50 border border-blue-300/50 text-white',
+    inactBtn: 'glass text-white hover:bg-white/20',
+    divider: 'border-white/10',
+    heatEmpty: 'bg-white/10', heat1: 'bg-blue-300/50', heat2: 'bg-blue-400/70', heat3: 'bg-blue-400',
+  } : {
+    bg: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 50%, #bfdbfe 100%)',
+    text: 'text-blue-950', textSub: 'text-blue-700', textMuted: 'text-blue-400',
+    glass: 'glass-light', input: 'bg-white/80 text-blue-950 placeholder-blue-300',
+    select: 'bg-white/80 text-blue-900',
+    badge: 'bg-blue-100 text-blue-700 border-blue-200',
+    activeBtn: 'bg-blue-500 border border-blue-600 text-white',
+    inactBtn: 'glass-light text-blue-800 hover:bg-blue-100',
+    divider: 'border-blue-200',
+    heatEmpty: 'bg-blue-100', heat1: 'bg-blue-200', heat2: 'bg-blue-400', heat3: 'bg-blue-600',
+  }
+
+  // ── 数据加载 ──
   const loadCategories = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('categories')
-      .select('name')
-      .order('created_at', { ascending: true })
+    const { data, error } = await supabase.from('categories').select('name').order('created_at', { ascending: true })
     if (error) { console.error('Error loading categories:', error); return }
     const names = (data || []).map((row: { name: string }) => row.name)
     setAllCategories(names)
-    if (names.length > 0 && !selectedCategory) {
-      setSelectedCategory(names[0])
-    }
+    if (names.length > 0 && !selectedCategory) setSelectedCategory(names[0])
   }, [selectedCategory])
 
   const loadBadWords = useCallback(async () => {
-    const { data, error } = await supabase.from('sensitive_words').select('word')
-    if (error) { console.error('Error loading sensitive words:', error); return }
+    const { data } = await supabase.from('sensitive_words').select('word')
     setBadWords((data || []).map((row: { word: string }) => row.word))
   }, [])
 
+  // 加载所有留言（含回复），客户端过滤
   const loadComments = useCallback(async () => {
-    let query = supabase.from('comments').select('*')
-    if (currentFilter !== '全部') {
-      query = query.eq('category', currentFilter)
-    }
-    const { data, error } = await query.order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('comments').select('*').order('created_at', { ascending: false })
     if (error) { console.error('Error loading comments:', error); return }
     setComments(data || [])
-  }, [currentFilter])
+  }, [])
+
+  useEffect(() => { loadComments(); loadBadWords(); loadCategories() }, [loadComments, loadBadWords, loadCategories])
 
   useEffect(() => {
-    loadComments()
-    loadBadWords()
-    loadCategories()
-  }, [loadComments, loadBadWords, loadCategories])
-
-  useEffect(() => {
-    const sub = supabase
-      .channel('public:comments')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const c = payload.new as Comment
-          if (currentFilter === '全部' || c.category === currentFilter) loadComments()
-        } else { loadComments() }
-      })
+    const sub = supabase.channel('public:comments')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => loadComments())
       .subscribe()
     return () => { supabase.removeChannel(sub) }
-  }, [loadComments, currentFilter])
+  }, [loadComments])
 
   useEffect(() => {
-    const sub = supabase
-      .channel('public:sensitive_words')
+    const sub = supabase.channel('public:sensitive_words')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sensitive_words' }, () => loadBadWords())
       .subscribe()
     return () => { supabase.removeChannel(sub) }
   }, [loadBadWords])
 
   useEffect(() => {
-    const sub = supabase
-      .channel('public:categories')
+    const sub = supabase.channel('public:categories')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => loadCategories())
       .subscribe()
     return () => { supabase.removeChannel(sub) }
   }, [loadCategories])
 
-  const calculateHotScore = (comment: Comment) => {
-    const now = new Date()
-    const createdAt = new Date(comment.created_at)
-    const hoursAgo = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)
-    return (comment.likes + comment.reports * 0.5) / (hoursAgo + 2)
+  // ── 工具函数 ──
+  const calculateHotScore = (c: Comment) => {
+    const hoursAgo = (Date.now() - new Date(c.created_at).getTime()) / 3600000
+    return (c.likes + c.reports * 0.5) / (hoursAgo + 2)
   }
 
-  const getSortedComments = () => {
-    const sorted = [...comments]
-    if (sortBy === 'time') {
-      return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    }
-    return sorted.sort((a, b) => calculateHotScore(b) - calculateHotScore(a))
+  const getTopLevelComments = () => {
+    let list = comments.filter(c => !c.parent_id)
+    if (currentFilter !== '全部') list = list.filter(c => c.category === currentFilter)
+    if (sortBy === 'time') list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    else list.sort((a, b) => calculateHotScore(b) - calculateHotScore(a))
+    return list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
   }
 
-  const getRelativeTime = (timestamp: string) => {
-    const now = new Date()
-    const past = new Date(timestamp)
-    const diff = Math.floor((now.getTime() - past.getTime()) / 1000)
+  const getReplies = (parentId: string) =>
+    comments.filter(c => c.parent_id === parentId)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+  const getCategoryCount = (cat: string) =>
+    comments.filter(c => !c.parent_id && (cat === '全部' || c.category === cat)).length
+
+  const getRelativeTime = (ts: string) => {
+    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
     if (diff < 60) return language === 'zh' ? `${diff}秒前` : `${diff}s ago`
     if (diff < 3600) return language === 'zh' ? `${Math.floor(diff / 60)}分钟前` : `${Math.floor(diff / 60)}m ago`
     if (diff < 86400) return language === 'zh' ? `${Math.floor(diff / 3600)}小时前` : `${Math.floor(diff / 3600)}h ago`
     return language === 'zh' ? `${Math.floor(diff / 86400)}天前` : `${Math.floor(diff / 86400)}d ago`
   }
 
-  const isControversial = (comment: Comment) =>
-    comment.reports / (comment.likes || 1) > 0.5 && comment.reports > 5
+  const isControversial = (c: Comment) => c.reports / (c.likes || 1) > 0.5 && c.reports > 5
 
+  // ── 热力图数据 ──
+  const getHeatmapData = () => {
+    const days = 35
+    return Array.from({ length: days }, (_, i) => {
+      const d = new Date()
+      d.setDate(d.getDate() - (days - 1 - i))
+      const dateStr = d.toISOString().split('T')[0]
+      const count = comments.filter(c => c.created_at.startsWith(dateStr)).length
+      return { dateStr, count }
+    })
+  }
+
+  const heatColor = (count: number) => {
+    if (count === 0) return th.heatEmpty
+    if (count === 1) return th.heat1
+    if (count <= 3) return th.heat2
+    return th.heat3
+  }
+
+  // ── 操作函数 ──
   const handleCategoryChange = (value: string) => {
-    if (value === '__new__') {
-      setNewCategoryInput('')
-      setShowNewCategoryModal(true)
-    } else {
-      setSelectedCategory(value)
-    }
+    if (value === '__new__') { setNewCategoryInput(''); setShowNewCategoryModal(true) }
+    else setSelectedCategory(value)
   }
 
   const handleConfirmNewCategory = () => {
@@ -187,131 +199,156 @@ export default function Home() {
   }
 
   const handlePublish = async () => {
-    if (!newComment.trim()) return
-    const content = newComment.toLowerCase()
-    const hitWord = badWords.find((word) => content.includes(word.toLowerCase()))
+    if (!newComment.trim() || newComment.length > MAX_CHARS) return
+    // 防重复
+    const now = Date.now()
+    if (lastSubmission && lastSubmission.content === newComment.trim() && now - lastSubmission.time < ANTI_SPAM_MS) {
+      alert('请勿在60秒内重复发送相同内容'); return
+    }
+    // 屏蔽词
+    const hitWord = badWords.find(w => newComment.toLowerCase().includes(w.toLowerCase()))
     if (hitWord) { alert('内容包含违禁词，请文明发言'); return }
     const category = selectedCategory.trim()
     if (!category) { alert('请选择或创建一个标签'); return }
     if (!allCategories.includes(category)) {
-      const { error: catError } = await supabase.from('categories').insert([{ name: category }])
-      if (catError && catError.code !== '23505') { console.error('Error creating category:', catError); return }
+      const { error: ce } = await supabase.from('categories').insert([{ name: category }])
+      if (ce && ce.code !== '23505') { console.error(ce); return }
       await loadCategories()
     }
-    const { error } = await supabase.from('comments').insert([{ content: newComment, category }])
-    if (error) { console.error('Error publishing comment:', error); return }
+    const { error } = await supabase.from('comments').insert([{ content: newComment, category, pinned: false, parent_id: null }])
+    if (error) { console.error(error); return }
+    setLastSubmission({ content: newComment.trim(), time: now })
     setNewComment('')
     loadComments()
   }
 
+  const handleReply = async (parentId: string) => {
+    if (!replyContent.trim() || replyContent.length > MAX_CHARS) return
+    const hitWord = badWords.find(w => replyContent.toLowerCase().includes(w.toLowerCase()))
+    if (hitWord) { alert('内容包含违禁词，请文明发言'); return }
+    const parent = comments.find(c => c.id === parentId)
+    const { error } = await supabase.from('comments').insert([{
+      content: replyContent, category: parent?.category || '', pinned: false, parent_id: parentId
+    }])
+    if (error) { console.error(error); return }
+    setReplyContent('')
+    setReplyingTo(null)
+    loadComments()
+  }
+
+  const handlePin = async (id: string, pinned: boolean) => {
+    await supabase.from('comments').update({ pinned: !pinned }).eq('id', id)
+  }
   const handleLike = async (id: string) => {
     await supabase.from('comments').update({ likes: (comments.find(c => c.id === id)?.likes || 0) + 1 }).eq('id', id)
   }
-
   const handleReport = async (id: string) => {
     await supabase.from('comments').update({ reports: (comments.find(c => c.id === id)?.reports || 0) + 1 }).eq('id', id)
   }
-
   const handleDelete = async (id: string) => {
     await supabase.from('comments').delete().eq('id', id)
   }
-
   const handleAdminLogin = () => {
     if (adminPassword === 'anon123') { setIsAdmin(true); setShowAdminModal(false) }
     setAdminPassword('')
   }
 
+  const topLevelComments = getTopLevelComments()
+  const totalCount = getCategoryCount('全部')
+
   return (
-    <div className="min-h-screen p-4 md:p-8">
+    <div className="min-h-screen p-4 md:p-8" style={{ background: th.bg }}>
       <div className="max-w-2xl mx-auto">
 
         {/* Header */}
-        <div className="glass rounded-2xl p-5 mb-6 flex items-center justify-between">
-          {/* 左侧：品牌标识区域 */}
+        <div className={`${th.glass} rounded-2xl p-5 mb-6 flex items-center justify-between`}>
           <div className="flex flex-col">
             <div className="flex items-baseline gap-2">
-              <span className="text-5xl font-black text-white tracking-tight leading-none">CWA</span>
-              <span className="text-white/70 text-sm font-medium tracking-wide">China World Academy</span>
+              <span className={`text-5xl font-black ${th.text} tracking-tight leading-none`}>CWA</span>
+              <span className={`${th.textSub} text-sm font-medium tracking-wide`}>China World Academy</span>
             </div>
-            <h1 className="text-base font-medium text-white/80 mt-1">{t.title}</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <h1 className={`text-base font-medium ${th.textSub}`}>{t.title}</h1>
+              <span className={`text-xs ${th.textMuted}`}>· {totalCount} 条留言</span>
+            </div>
           </div>
-          {/* 右侧：操作按钮 */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-              className="glass px-4 py-2 rounded-lg text-white hover:bg-white/20 transition-colors flex items-center gap-2"
-            >
-              <Languages size={16} />
-              {language === 'zh' ? 'EN' : '中文'}
+            <button onClick={() => setIsDark(!isDark)} className={`${th.glass} p-2 rounded-lg ${th.text} hover:bg-white/20 transition-colors`}>
+              {isDark ? <Sun size={16} /> : <Moon size={16} />}
             </button>
-            <button
-              onClick={() => setShowAdminModal(true)}
-              className="glass px-4 py-2 rounded-lg text-white hover:bg-white/20 transition-colors text-sm opacity-50 hover:opacity-100"
-            >
+            <button onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')} className={`${th.glass} px-4 py-2 rounded-lg ${th.text} hover:bg-white/20 transition-colors flex items-center gap-2`}>
+              <Languages size={16} />{language === 'zh' ? 'EN' : '中文'}
+            </button>
+            <button onClick={() => setShowAdminModal(true)} className={`${th.glass} px-4 py-2 rounded-lg ${th.text} hover:bg-white/20 transition-colors text-sm opacity-50 hover:opacity-100`}>
               {t.admin}
             </button>
           </div>
         </div>
 
         {/* Sort Buttons */}
-        <div className="glass rounded-2xl p-4 mb-4 flex gap-2 flex-wrap">
-          <button
-            onClick={() => setSortBy('time')}
-            className={`px-4 py-2 rounded-lg text-white transition-colors flex items-center gap-2 ${
-              sortBy === 'time' ? 'bg-blue-500/50 border border-blue-300/50' : 'glass hover:bg-white/20'
-            }`}
-          >
+        <div className={`${th.glass} rounded-2xl p-4 mb-4 flex gap-2 flex-wrap`}>
+          <button onClick={() => setSortBy('time')} className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${sortBy === 'time' ? th.activeBtn : th.inactBtn}`}>
             <Clock size={16} />{t.timeSort}
           </button>
-          <button
-            onClick={() => setSortBy('hot')}
-            className={`px-4 py-2 rounded-lg text-white transition-colors flex items-center gap-2 ${
-              sortBy === 'hot' ? 'bg-blue-500/50 border border-blue-300/50' : 'glass hover:bg-white/20'
-            }`}
-          >
+          <button onClick={() => setSortBy('hot')} className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${sortBy === 'hot' ? th.activeBtn : th.inactBtn}`}>
             <Flame size={16} />{t.hotSort}
+          </button>
+          <button onClick={() => setShowHeatmap(!showHeatmap)} className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${showHeatmap ? th.activeBtn : th.inactBtn} ml-auto`}>
+            <BarChart2 size={16} />热力图
           </button>
         </div>
 
+        {/* Heatmap */}
+        {showHeatmap && (
+          <div className={`${th.glass} rounded-2xl p-4 mb-4`}>
+            <p className={`text-xs ${th.textMuted} mb-2`}>近35天发帖活跃度</p>
+            <div className="grid grid-cols-7 gap-1">
+              {getHeatmapData().map(({ dateStr, count }) => (
+                <div key={dateStr} title={`${dateStr}: ${count}条`}
+                  className={`h-6 rounded ${heatColor(count)} transition-colors cursor-default`} />
+              ))}
+            </div>
+            <div className={`flex items-center gap-2 mt-2 text-xs ${th.textMuted}`}>
+              <span>少</span>
+              <div className={`w-4 h-4 rounded ${th.heatEmpty}`} />
+              <div className={`w-4 h-4 rounded ${th.heat1}`} />
+              <div className={`w-4 h-4 rounded ${th.heat2}`} />
+              <div className={`w-4 h-4 rounded ${th.heat3}`} />
+              <span>多</span>
+            </div>
+          </div>
+        )}
+
         {/* Category Filter */}
-        <div className="glass rounded-2xl p-4 mb-4 flex gap-2 flex-wrap">
-          <button
-            onClick={() => setCurrentFilter('全部')}
-            className={`px-4 py-2 rounded-lg text-white transition-colors ${
-              currentFilter === '全部' ? 'bg-blue-500/50 border border-blue-300/50' : 'glass hover:bg-white/20'
-            }`}
-          >
-            全部
-          </button>
-          {allCategories.map((category) => (
-            <button
-              key={category}
-              onClick={() => setCurrentFilter(category)}
-              className={`px-4 py-2 rounded-lg text-white transition-colors ${
-                currentFilter === category ? 'bg-blue-500/50 border border-blue-300/50' : 'glass hover:bg-white/20'
-              }`}
-            >
-              {category}
+        <div className={`${th.glass} rounded-2xl p-4 mb-4 flex gap-2 flex-wrap`}>
+          {['全部', ...allCategories].map((cat) => (
+            <button key={cat} onClick={() => setCurrentFilter(cat)}
+              className={`px-4 py-2 rounded-lg transition-colors ${currentFilter === cat ? th.activeBtn : th.inactBtn}`}>
+              {cat}
+              <span className={`ml-1 text-xs opacity-60`}>({getCategoryCount(cat)})</span>
             </button>
           ))}
         </div>
 
         {/* Input Area */}
-        <div className="glass rounded-2xl p-5 mb-6">
-          <textarea
-            value={newComment}
-            onChange={(e) => setNewComment(e.target.value)}
-            placeholder={t.placeholder}
-            rows={3}
-            className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none mb-3"
-          />
+        <div className={`${th.glass} rounded-2xl p-5 mb-6`}>
+          <div className="relative mb-3">
+            <textarea
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder={t.placeholder}
+              rows={3}
+              maxLength={MAX_CHARS}
+              className={`w-full px-4 py-3 rounded-lg ${th.input} focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none`}
+            />
+            <span className={`absolute bottom-2 right-3 text-xs ${newComment.length > MAX_CHARS * 0.9 ? 'text-red-400' : th.textMuted}`}>
+              {newComment.length}/{MAX_CHARS}
+            </span>
+          </div>
           <div className="flex items-center gap-3">
             <div className="flex-1">
-              <select
-                value={selectedCategory}
-                onChange={(e) => handleCategoryChange(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-300"
-              >
+              <select value={selectedCategory} onChange={(e) => handleCategoryChange(e.target.value)}
+                className={`w-full px-4 py-2 rounded-lg ${th.select} focus:outline-none focus:ring-2 focus:ring-blue-300`}>
                 {selectedCategory && !allCategories.includes(selectedCategory) && (
                   <option value={selectedCategory} className="text-gray-800">{selectedCategory}</option>
                 )}
@@ -321,10 +358,8 @@ export default function Home() {
                 <option value="__new__" className="text-gray-400">＋ 新建标签</option>
               </select>
             </div>
-            <button
-              onClick={handlePublish}
-              className="bg-blue-500 hover:bg-blue-400 active:bg-blue-600 px-6 py-2 rounded-lg text-white font-semibold shadow-lg shadow-blue-900/30 transition-all flex items-center gap-2"
-            >
+            <button onClick={handlePublish} disabled={newComment.length > MAX_CHARS}
+              className="bg-blue-500 hover:bg-blue-400 active:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed px-6 py-2 rounded-lg text-white font-semibold shadow-lg shadow-blue-900/30 transition-all flex items-center gap-2">
               <Send size={16} />{t.publish}
             </button>
           </div>
@@ -332,39 +367,112 @@ export default function Home() {
 
         {/* Comments List */}
         <div className="space-y-3">
-          {getSortedComments().map((comment) => (
-            <div key={comment.id} className="glass rounded-xl p-4 border border-blue-300/20 hover:border-blue-300/40 transition-all">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs bg-blue-500/30 text-blue-100 px-2 py-0.5 rounded-full border border-blue-400/30">
-                  {comment.category}
-                </span>
-                <span className="text-white/50 text-xs flex items-center gap-1">
-                  <Clock size={12} />{getRelativeTime(comment.created_at)}
-                </span>
+          {topLevelComments.map((comment) => (
+            <div key={comment.id}>
+              {/* 主留言 */}
+              <div className={`${th.glass} rounded-xl p-4 border ${comment.pinned ? 'border-yellow-400/50' : 'border-blue-300/20 hover:border-blue-300/40'} transition-all`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs ${th.badge} px-2 py-0.5 rounded-full border`}>{comment.category}</span>
+                    {comment.pinned && <span className="text-xs text-yellow-400 flex items-center gap-1"><Pin size={10} />置顶</span>}
+                  </div>
+                  <span className={`${th.textMuted} text-xs flex items-center gap-1`}>
+                    <Clock size={12} />{getRelativeTime(comment.created_at)}
+                  </span>
+                </div>
+                <p className={`${th.text} mb-3 leading-relaxed`}>{comment.content}</p>
+                {isControversial(comment) && (
+                  <div className="flex items-center gap-1 text-amber-400 text-xs mb-2">
+                    <AlertTriangle size={12} />{t.controversial}
+                  </div>
+                )}
+                <div className={`flex items-center gap-4 pt-2 border-t ${th.divider}`}>
+                  <button onClick={() => handleLike(comment.id)} className={`${th.text} hover:text-blue-300 transition-colors flex items-center gap-1 text-sm`}>
+                    <ThumbsUp size={14} />{comment.likes}
+                  </button>
+                  <button onClick={() => handleReport(comment.id)} className={`${th.text} hover:text-red-300 transition-colors flex items-center gap-1 text-sm`}>
+                    <AlertTriangle size={14} />{comment.reports}
+                  </button>
+                  <button
+                    onClick={() => setReplyingTo(replyingTo === comment.id ? null : comment.id)}
+                    className={`${th.text} hover:text-blue-300 transition-colors flex items-center gap-1 text-sm`}>
+                    <MessageCircle size={14} />
+                    回复 {getReplies(comment.id).length > 0 && `(${getReplies(comment.id).length})`}
+                  </button>
+                  {isAdmin && (
+                    <div className="ml-auto flex items-center gap-2">
+                      <button onClick={() => handlePin(comment.id, comment.pinned)} className={`${th.text} hover:text-yellow-300 transition-colors`}>
+                        {comment.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                      </button>
+                      <button onClick={() => handleDelete(comment.id)} className={`${th.text} hover:text-red-300 transition-colors flex items-center gap-1 text-sm`}>
+                        <Trash2 size={14} />{t.delete}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-              <p className="text-white mb-3 leading-relaxed">{comment.content}</p>
-              {isControversial(comment) && (
-                <div className="flex items-center gap-1 text-amber-400 text-xs mb-2">
-                  <AlertTriangle size={12} />{t.controversial}
+
+              {/* 回复列表 */}
+              {getReplies(comment.id).length > 0 && (
+                <div className="ml-6 mt-1 space-y-1">
+                  {getReplies(comment.id).map((reply) => (
+                    <div key={reply.id} className={`${th.glass} rounded-xl px-4 py-3 border border-blue-300/10`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`text-xs ${th.textMuted}`}>↩ 回复</span>
+                        <span className={`${th.textMuted} text-xs`}>{getRelativeTime(reply.created_at)}</span>
+                      </div>
+                      <p className={`${th.text} text-sm leading-relaxed`}>{reply.content}</p>
+                      <div className={`flex items-center gap-3 pt-2 border-t ${th.divider} mt-2`}>
+                        <button onClick={() => handleLike(reply.id)} className={`${th.text} hover:text-blue-300 transition-colors flex items-center gap-1 text-xs`}>
+                          <ThumbsUp size={12} />{reply.likes}
+                        </button>
+                        {isAdmin && (
+                          <button onClick={() => handleDelete(reply.id)} className={`${th.text} hover:text-red-300 transition-colors flex items-center gap-1 text-xs ml-auto`}>
+                            <Trash2 size={12} />{t.delete}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-              <div className="flex items-center gap-4 pt-2 border-t border-white/10">
-                <button onClick={() => handleLike(comment.id)} className="text-white hover:text-blue-300 transition-colors flex items-center gap-1 text-sm">
-                  <ThumbsUp size={14} />{comment.likes}
-                </button>
-                <button onClick={() => handleReport(comment.id)} className="text-white hover:text-red-300 transition-colors flex items-center gap-1 text-sm">
-                  <AlertTriangle size={14} />{comment.reports}
-                </button>
-                {isAdmin && (
-                  <button onClick={() => handleDelete(comment.id)} className="text-white hover:text-red-300 transition-colors flex items-center gap-1 text-sm ml-auto">
-                    <Trash2 size={14} />{t.delete}
-                  </button>
-                )}
-              </div>
+
+              {/* 回复输入框 */}
+              {replyingTo === comment.id && (
+                <div className="ml-6 mt-1">
+                  <div className={`${th.glass} rounded-xl p-3`}>
+                    <div className="relative mb-2">
+                      <textarea
+                        value={replyContent}
+                        onChange={(e) => setReplyContent(e.target.value)}
+                        placeholder="输入回复内容..."
+                        rows={2}
+                        maxLength={MAX_CHARS}
+                        autoFocus
+                        className={`w-full px-3 py-2 rounded-lg ${th.input} focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none text-sm`}
+                      />
+                      <span className={`absolute bottom-2 right-3 text-xs ${th.textMuted}`}>
+                        {replyContent.length}/{MAX_CHARS}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={() => { setReplyingTo(null); setReplyContent('') }}
+                        className={`${th.glass} px-3 py-1 rounded-lg ${th.text} hover:bg-white/20 text-sm transition-colors`}>
+                        取消
+                      </button>
+                      <button onClick={() => handleReply(comment.id)} disabled={replyContent.length > MAX_CHARS}
+                        className="bg-blue-500 hover:bg-blue-400 disabled:opacity-40 px-4 py-1 rounded-lg text-white text-sm font-medium transition-colors flex items-center gap-1">
+                        <Send size={12} />发送
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
-          {comments.length === 0 && (
-            <div className="glass rounded-xl p-8 text-center text-white/50">{t.noComments}</div>
+
+          {topLevelComments.length === 0 && (
+            <div className={`${th.glass} rounded-xl p-8 text-center ${th.textMuted}`}>{t.noComments}</div>
           )}
         </div>
 
@@ -374,26 +482,15 @@ export default function Home() {
             <div className="glass rounded-2xl p-6 w-80 shadow-2xl">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-white font-bold text-lg">新建标签</h2>
-                <button onClick={() => setShowNewCategoryModal(false)} className="text-white/50 hover:text-white">
-                  <X size={20} />
-                </button>
+                <button onClick={() => setShowNewCategoryModal(false)} className="text-white/50 hover:text-white"><X size={20} /></button>
               </div>
-              <input
-                type="text"
-                value={newCategoryInput}
-                onChange={(e) => setNewCategoryInput(e.target.value)}
+              <input type="text" value={newCategoryInput} onChange={(e) => setNewCategoryInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleConfirmNewCategory()}
-                placeholder="输入标签名..."
-                autoFocus
-                className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-300 mb-4"
-              />
+                placeholder="输入标签名..." autoFocus
+                className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-300 mb-4" />
               <div className="flex gap-3">
-                <button onClick={handleConfirmNewCategory} className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-2 rounded-lg font-semibold transition-colors">
-                  确认
-                </button>
-                <button onClick={() => setShowNewCategoryModal(false)} className="flex-1 glass text-white py-2 rounded-lg hover:bg-white/20 transition-colors">
-                  取消
-                </button>
+                <button onClick={handleConfirmNewCategory} className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-2 rounded-lg font-semibold transition-colors">确认</button>
+                <button onClick={() => setShowNewCategoryModal(false)} className="flex-1 glass text-white py-2 rounded-lg hover:bg-white/20 transition-colors">取消</button>
               </div>
             </div>
           </div>
@@ -404,20 +501,12 @@ export default function Home() {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
             <div className="glass rounded-2xl p-6 w-80 shadow-2xl">
               <h2 className="text-white font-bold text-lg mb-4">{t.admin}</h2>
-              <input
-                type="password"
-                value={adminPassword}
-                onChange={(e) => setAdminPassword(e.target.value)}
+              <input type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)}
                 placeholder="Password"
-                className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-300 mb-4"
-              />
+                className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-300 mb-4" />
               <div className="flex gap-3">
-                <button onClick={handleAdminLogin} className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-2 rounded-lg font-semibold transition-colors">
-                  Login
-                </button>
-                <button onClick={() => setShowAdminModal(false)} className="flex-1 glass text-white py-2 rounded-lg hover:bg-white/20 transition-colors">
-                  Cancel
-                </button>
+                <button onClick={handleAdminLogin} className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-2 rounded-lg font-semibold transition-colors">Login</button>
+                <button onClick={() => setShowAdminModal(false)} className="flex-1 glass text-white py-2 rounded-lg hover:bg-white/20 transition-colors">Cancel</button>
               </div>
             </div>
           </div>
