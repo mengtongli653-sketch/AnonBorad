@@ -262,6 +262,8 @@ export default function Home() {
     const confirmed = window.confirm('确定要删除该标签吗？这不会删除已有的留言，但该标签将不再显示。')
     if (!confirmed) return
 
+    console.log('准备删除标签:', categoryName)
+
     // RLS 提醒：在生产环境中，应该启用 RLS 并确保只有管理员可以删除标签
     // 由于当前关闭了 RLS，直接执行删除操作
     const { error } = await supabase
@@ -274,11 +276,18 @@ export default function Home() {
       return
     }
 
+    console.log('标签删除成功:', categoryName)
+
     // 更新标签列表
     const { data: updatedCategories } = await supabase
       .from('categories')
       .select('name')
-    setAllCategories(updatedCategories?.map(item => item.name) || [])
+    
+    console.log('更新后的标签列表:', updatedCategories)
+    
+    // 过滤掉已删除的标签，确保界面实时刷新
+    const newCategories = updatedCategories?.map(item => item.name) || []
+    setAllCategories(newCategories)
 
     // 如果当前筛选的是被删除的标签，切换到全部
     if (currentFilter === categoryName) {
@@ -286,8 +295,8 @@ export default function Home() {
     }
 
     // 如果当前选择的是被删除的标签，切换到第一个可用标签
-    if (selectedCategory === categoryName && updatedCategories && updatedCategories.length > 0) {
-      setSelectedCategory(updatedCategories[0].name)
+    if (selectedCategory === categoryName && newCategories.length > 0) {
+      setSelectedCategory(newCategories[0])
     }
   }
 
