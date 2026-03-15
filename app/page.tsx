@@ -189,10 +189,17 @@ export default function Home() {
   const handlePublish = async () => {
     if (!newComment.trim()) return
 
+    console.log('当前内容:', newComment)
+    console.log('词库:', badWords)
+    console.log('词库类型:', typeof badWords, '词库长度:', badWords.length)
+
     // 检查留言内容是否包含屏蔽词
-    const containsBadWord = badWords.some(word => 
-      newComment.toLowerCase().includes(word.toLowerCase())
-    )
+    const containsBadWord = badWords.some(word => {
+      console.log('检查词:', word, '词类型:', typeof word)
+      return newComment.toLowerCase().includes(word.toLowerCase())
+    })
+
+    console.log('是否包含屏蔽词:', containsBadWord)
 
     if (containsBadWord) {
       alert('您的留言包含敏感词汇，请修改后发布')
