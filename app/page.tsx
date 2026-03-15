@@ -73,6 +73,7 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState('生活')
   const [allCategories, setAllCategories] = useState<string[]>([])
   const [customCategory, setCustomCategory] = useState('')
+  const [badWords, setBadWords] = useState<string[]>([])
   const t = translations[language]
 
   const loadComments = useCallback(async () => {
@@ -113,6 +114,23 @@ export default function Home() {
     }
 
     loadCategories()
+  }, [])
+
+  useEffect(() => {
+    const loadBadWords = async () => {
+      const { data, error } = await supabase
+        .from('sensitive_words')
+        .select('word')
+
+      if (error) {
+        console.error('Error loading bad words:', error)
+        return
+      }
+
+      setBadWords(data?.map(item => item.word) || [])
+    }
+
+    loadBadWords()
   }, [])
 
   useEffect(() => {
@@ -171,11 +189,31 @@ export default function Home() {
   const handlePublish = async () => {
     if (!newComment.trim()) return
 
+    // 检查留言内容是否包含屏蔽词
+    const containsBadWord = badWords.some(word => 
+      newComment.toLowerCase().includes(word.toLowerCase())
+    )
+
+    if (containsBadWord) {
+      alert('您的留言包含敏感词汇，请修改后发布')
+      return
+    }
+
     let finalCategory = selectedCategory
 
     // 处理自定义标签
     if (selectedCategory === '自定义新标签' && customCategory.trim()) {
       finalCategory = customCategory.trim()
+      
+      // 检查自定义标签名是否包含屏蔽词
+      const categoryContainsBadWord = badWords.some(word => 
+        finalCategory.toLowerCase().includes(word.toLowerCase())
+      )
+
+      if (categoryContainsBadWord) {
+        alert('您的标签名包含敏感词汇，请修改后发布')
+        return
+      }
       
       // 检查标签是否已存在
       const { data: existingCategories } = await supabase
