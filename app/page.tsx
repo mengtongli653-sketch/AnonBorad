@@ -74,21 +74,15 @@ export default function Home() {
   const t = translations[language]
 
   const loadComments = useCallback(async () => {
-    let query = supabase
-      .from('comments')
-      .select('*')
-
+    let query = supabase.from('comments').select('*')
     if (currentFilter !== '全部') {
       query = query.eq('category', currentFilter)
     }
-
     const { data, error } = await query.order('created_at', { ascending: false })
-
     if (error) {
       console.error('Error loading comments:', error)
       return
     }
-
     setComments(data || [])
   }, [currentFilter])
 
@@ -110,7 +104,6 @@ export default function Home() {
         }
       })
       .subscribe()
-
     return () => {
       supabase.removeChannel(subscription)
     }
@@ -126,7 +119,7 @@ export default function Home() {
   const getSortedComments = () => {
     const sorted = [...comments]
     if (sortBy === 'time') {
-      return sorted.sort((a, b) => 
+      return sorted.sort((a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
     } else {
@@ -138,7 +131,6 @@ export default function Home() {
     const now = new Date()
     const past = new Date(timestamp)
     const diffInSeconds = Math.floor((now.getTime() - past.getTime()) / 1000)
-
     if (diffInSeconds < 60) return language === 'zh' ? `${diffInSeconds}秒前` : `${diffInSeconds}s ago`
     if (diffInSeconds < 3600) return language === 'zh' ? `${Math.floor(diffInSeconds / 60)}分钟前` : `${Math.floor(diffInSeconds / 60)}m ago`
     if (diffInSeconds < 86400) return language === 'zh' ? `${Math.floor(diffInSeconds / 3600)}小时前` : `${Math.floor(diffInSeconds / 3600)}h ago`
@@ -151,16 +143,13 @@ export default function Home() {
 
   const handlePublish = async () => {
     if (!newComment.trim()) return
-
     const { error } = await supabase
       .from('comments')
       .insert([{ content: newComment, category: selectedCategory }])
-
     if (error) {
       console.error('Error publishing comment:', error)
       return
     }
-
     setNewComment('')
     loadComments()
   }
@@ -170,10 +159,7 @@ export default function Home() {
       .from('comments')
       .update({ likes: (comments.find(c => c.id === id)?.likes || 0) + 1 })
       .eq('id', id)
-
-    if (error) {
-      console.error('Error liking comment:', error)
-    }
+    if (error) console.error('Error liking comment:', error)
   }
 
   const handleReport = async (id: string) => {
@@ -181,21 +167,12 @@ export default function Home() {
       .from('comments')
       .update({ reports: (comments.find(c => c.id === id)?.reports || 0) + 1 })
       .eq('id', id)
-
-    if (error) {
-      console.error('Error reporting comment:', error)
-    }
+    if (error) console.error('Error reporting comment:', error)
   }
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase
-      .from('comments')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      console.error('Error deleting comment:', error)
-    }
+    const { error } = await supabase.from('comments').delete().eq('id', id)
+    if (error) console.error('Error deleting comment:', error)
   }
 
   const handleAdminLogin = () => {
@@ -208,177 +185,191 @@ export default function Home() {
 
   return (
     <div className="min-h-screen p-4 md:p-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="glass rounded-2xl p-6 mb-6">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-3xl font-bold text-white">{t.title}</h1>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-                className="glass px-4 py-2 rounded-lg text-white hover:bg-white/20 transition-colors flex items-center gap-2"
-              >
-                <Languages size={20} />
-                {language === 'zh' ? 'EN' : '中文'}
-              </button>
-              <button
-                onClick={() => setShowAdminModal(true)}
-                className="glass px-4 py-2 rounded-lg text-white hover:bg-white/20 transition-colors text-sm opacity-50 hover:opacity-100"
-              >
-                {t.admin}
-              </button>
-            </div>
-          </div>
+      <div className="max-w-2xl mx-auto">
 
-          <div className="flex gap-2 mb-6">
+        {/* Header */}
+        <div className="glass rounded-2xl p-5 mb-6 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-white tracking-wide">{t.title}</h1>
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setSortBy('time')}
-              className={`glass px-4 py-2 rounded-lg text-white transition-colors flex items-center gap-2 ${sortBy === 'time' ? 'bg-white/30' : 'hover:bg-white/20'}`}
+              onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
+              className="glass px-4 py-2 rounded-lg text-white hover:bg-white/20 transition-colors flex items-center gap-2"
             >
-              <Clock size={20} />
-              {t.timeSort}
+              <Languages size={16} />
+              {language === 'zh' ? 'EN' : '中文'}
             </button>
             <button
-              onClick={() => setSortBy('hot')}
-              className={`glass px-4 py-2 rounded-lg text-white transition-colors flex items-center gap-2 ${sortBy === 'hot' ? 'bg-white/30' : 'hover:bg-white/20'}`}
+              onClick={() => setShowAdminModal(true)}
+              className="glass px-4 py-2 rounded-lg text-white hover:bg-white/20 transition-colors text-sm opacity-50 hover:opacity-100"
             >
-              <Flame size={20} />
-              {t.hotSort}
+              {t.admin}
             </button>
-          </div>
-
-          <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-            {['全部', '生活', '技术', '树洞'].map((category) => (
-              <button
-                key={category}
-                onClick={() => setCurrentFilter(category)}
-                className={`glass px-4 py-2 rounded-lg text-white transition-colors ${currentFilter === category ? 'bg-white/30' : 'hover:bg-white/20'}`}
-              >
-                {category}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-4">
-            <input
-              type="text"
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              placeholder={t.placeholder}
-              className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
-            />
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="block text-white/70 text-sm mb-1">标签</label>
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-4 py-2 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
-                >
-                  <option value="生活">生活</option>
-                  <option value="技术">技术</option>
-                  <option value="树洞">树洞</option>
-                  <option value="其他">其他</option>
-                </select>
-              </div>
-              <button
-                onClick={handlePublish}
-                className="glass px-6 py-3 rounded-lg text-white hover:bg-white/20 transition-colors flex items-center gap-2 self-end"
-              >
-                <Send size={20} />
-                {t.publish}
-              </button>
-            </div>
           </div>
         </div>
 
-        <div className="space-y-4">
+        {/* Sort Buttons */}
+        <div className="glass rounded-2xl p-4 mb-4 flex gap-2 flex-wrap">
+          <button
+            onClick={() => setSortBy('time')}
+            className={`px-4 py-2 rounded-lg text-white transition-colors flex items-center gap-2 ${
+              sortBy === 'time'
+                ? 'bg-blue-500/50 border border-blue-300/50'
+                : 'glass hover:bg-white/20'
+            }`}
+          >
+            <Clock size={16} />
+            {t.timeSort}
+          </button>
+          <button
+            onClick={() => setSortBy('hot')}
+            className={`px-4 py-2 rounded-lg text-white transition-colors flex items-center gap-2 ${
+              sortBy === 'hot'
+                ? 'bg-blue-500/50 border border-blue-300/50'
+                : 'glass hover:bg-white/20'
+            }`}
+          >
+            <Flame size={16} />
+            {t.hotSort}
+          </button>
+        </div>
+
+        {/* Category Filter */}
+        <div className="glass rounded-2xl p-4 mb-4 flex gap-2 flex-wrap">
+          {['全部', '生活', '技术', '树洞'].map((category) => (
+            <button
+              key={category}
+              onClick={() => setCurrentFilter(category)}
+              className={`px-4 py-2 rounded-lg text-white transition-colors ${
+                currentFilter === category
+                  ? 'bg-blue-500/50 border border-blue-300/50'
+                  : 'glass hover:bg-white/20'
+              }`}
+            >
+              {category}
+            </button>
+          ))}
+        </div>
+
+        {/* Input Area */}
+        <div className="glass rounded-2xl p-5 mb-6">
+          <textarea
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            placeholder={t.placeholder}
+            rows={3}
+            className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none mb-3"
+          />
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+              >
+                <option value="生活" className="text-gray-800">生活</option>
+                <option value="技术" className="text-gray-800">技术</option>
+                <option value="树洞" className="text-gray-800">树洞</option>
+                <option value="其他" className="text-gray-800">其他</option>
+              </select>
+            </div>
+            <button
+              onClick={handlePublish}
+              className="bg-blue-500 hover:bg-blue-400 active:bg-blue-600 px-6 py-2 rounded-lg text-white font-semibold shadow-lg shadow-blue-900/30 transition-all flex items-center gap-2"
+            >
+              <Send size={16} />
+              {t.publish}
+            </button>
+          </div>
+        </div>
+
+        {/* Comments List */}
+        <div className="space-y-3">
           {getSortedComments().map((comment) => (
             <div
               key={comment.id}
-              className={`glass rounded-2xl p-6 transition-all duration-300 ${isControversial(comment) ? 'opacity-50' : ''}`}
+              className="glass rounded-xl p-4 border border-blue-300/20 hover:border-blue-300/40 transition-all"
             >
-              <div className="flex justify-between items-start mb-4">
-                <span className="glass px-3 py-1 rounded-full text-white text-sm">{comment.category}</span>
-                <span className="text-white/70 text-sm">{getRelativeTime(comment.created_at)}</span>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs bg-blue-500/30 text-blue-100 px-2 py-0.5 rounded-full border border-blue-400/30">
+                  {comment.category}
+                </span>
+                <span className="text-white/50 text-xs flex items-center gap-1">
+                  <Clock size={12} />
+                  {getRelativeTime(comment.created_at)}
+                </span>
               </div>
-              
-              <p className={`text-white mb-4 ${isControversial(comment) ? 'blur-sm' : ''}`}>
-                {comment.content}
-              </p>
-
+              <p className="text-white mb-3 leading-relaxed">{comment.content}</p>
               {isControversial(comment) && (
-                <div className="flex items-center gap-2 mb-4 text-red-300">
-                  <AlertTriangle size={20} />
-                  <span className="font-medium">{t.controversial}</span>
+                <div className="flex items-center gap-1 text-amber-400 text-xs mb-2">
+                  <AlertTriangle size={12} />
+                  {t.controversial}
                 </div>
               )}
-
-              <div className="flex justify-end items-center">
-                <div className="flex gap-4">
+              <div className="flex items-center gap-4 pt-2 border-t border-white/10">
+                <button
+                  onClick={() => handleLike(comment.id)}
+                  className="text-white hover:text-blue-300 transition-colors flex items-center gap-1 text-sm"
+                >
+                  <ThumbsUp size={14} />
+                  {comment.likes}
+                </button>
+                <button
+                  onClick={() => handleReport(comment.id)}
+                  className="text-white hover:text-red-300 transition-colors flex items-center gap-1 text-sm"
+                >
+                  <AlertTriangle size={14} />
+                  {comment.reports}
+                </button>
+                {isAdmin && (
                   <button
-                    onClick={() => handleLike(comment.id)}
-                    className="text-white hover:text-indigo-300 transition-colors flex items-center gap-1"
+                    onClick={() => handleDelete(comment.id)}
+                    className="text-white hover:text-red-300 transition-colors flex items-center gap-1 text-sm ml-auto"
                   >
-                    <ThumbsUp size={20} />
-                    {comment.likes}
+                    <Trash2 size={14} />
+                    {t.delete}
                   </button>
-                  <button
-                    onClick={() => handleReport(comment.id)}
-                    className="text-white hover:text-red-300 transition-colors flex items-center gap-1"
-                  >
-                    <AlertTriangle size={20} />
-                    {comment.reports}
-                  </button>
-                  {isAdmin && (
-                    <button
-                      onClick={() => handleDelete(comment.id)}
-                      className="text-white hover:text-red-300 transition-colors flex items-center gap-1"
-                    >
-                      <Trash2 size={20} />
-                      {t.delete}
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
             </div>
           ))}
-
           {comments.length === 0 && (
-            <div className="glass rounded-2xl p-12 text-center">
-              <p className="text-white/70">{t.noComments}</p>
+            <div className="glass rounded-xl p-8 text-center text-white/50">
+              {t.noComments}
             </div>
           )}
         </div>
-      </div>
 
-      {showAdminModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="glass rounded-2xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-xl font-bold text-white mb-4">{t.admin}</h2>
-            <input
-              type="password"
-              value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
-              placeholder="Password"
-              className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 mb-4"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={handleAdminLogin}
-                className="flex-1 bg-indigo-500 text-white py-2 rounded-lg hover:bg-indigo-600 transition-colors"
-              >
-                Login
-              </button>
-              <button
-                onClick={() => setShowAdminModal(false)}
-                className="flex-1 glass text-white py-2 rounded-lg hover:bg-white/20 transition-colors"
-              >
-                Cancel
-              </button>
+        {/* Admin Modal */}
+        {showAdminModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="glass rounded-2xl p-6 w-80 shadow-2xl">
+              <h2 className="text-white font-bold text-lg mb-4">{t.admin}</h2>
+              <input
+                type="password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                placeholder="Password"
+                className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-300 mb-4"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={handleAdminLogin}
+                  className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-2 rounded-lg font-semibold transition-colors"
+                >
+                  Login
+                </button>
+                <button
+                  onClick={() => setShowAdminModal(false)}
+                  className="flex-1 glass text-white py-2 rounded-lg hover:bg-white/20 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+      </div>
     </div>
   )
 }
