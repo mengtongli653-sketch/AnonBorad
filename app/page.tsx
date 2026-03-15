@@ -16,7 +16,7 @@ interface Comment {
   reports: number
   created_at: string
   category: string
-  is_visible?: boolean
+  is_hidden?: boolean
 }
 
 interface Translations {
@@ -131,9 +131,9 @@ export default function Home() {
       query = query.eq('category', currentFilter)
     }
 
-    // 只加载可见的留言，除非是管理员
+    // 只加载未隐藏的留言，除非是管理员
     if (!isAdmin) {
-      query = query.eq('is_visible', true)
+      query = query.eq('is_hidden', false)
     }
 
     const { data, error } = await query.order('created_at', { ascending: false })
@@ -342,11 +342,26 @@ export default function Home() {
     // 获取设备指纹
     const fingerprint = getUserFingerprint()
     
-    // 后端检查唯一性（这里简化处理，实际应该在后端实现）
+    // 先向 interactions 表插入数据
+    const { error: interactionError } = await supabase
+      .from('interactions')
+      .insert([{
+        comment_id: id,
+        user_fingerprint: fingerprint,
+        action: 'like',
+        created_at: new Date().toISOString()
+      }])
+
+    if (interactionError) {
+      console.error('Error inserting interaction:', interactionError)
+      // 如果插入失败，不更新点赞数
+      return
+    }
+    
     // 记录操作到localStorage
     localStorage.setItem(`like_${id}`, 'true')
     
-    // 更新点赞数
+    // 插入成功后，更新 comments 表的 likes 字段
     const { error } = await supabase
       .from('comments')
       .update({ likes: (comments.find(c => c.id === id)?.likes || 0) + 1 })
@@ -389,7 +404,22 @@ export default function Home() {
     // 获取设备指纹
     const fingerprint = getUserFingerprint()
     
-    // 后端检查唯一性（这里简化处理，实际应该在后端实现）
+    // 先向 interactions 表插入数据
+    const { error: interactionError } = await supabase
+      .from('interactions')
+      .insert([{
+        comment_id: id,
+        user_fingerprint: fingerprint,
+        action: 'report',
+        created_at: new Date().toISOString()
+      }])
+
+    if (interactionError) {
+      console.error('Error inserting interaction:', interactionError)
+      // 如果插入失败，不更新举报数
+      return
+    }
+    
     // 记录操作到localStorage
     localStorage.setItem(`report_${id}`, 'true')
     
@@ -398,13 +428,13 @@ export default function Home() {
     const currentReports = comment?.reports || 0
     const newReports = currentReports + 1
     
-    // 检查是否达到举报阈值
+    // 检查是否达到举报阈值，达到5次将 is_hidden 设置为 true
     const updateData: any = { reports: newReports }
     if (newReports >= 5) {
-      updateData.is_visible = false
+      updateData.is_hidden = true
     }
     
-    // 更新举报数
+    // 插入成功后，更新 comments 表的 reports 字段
     const { error } = await supabase
       .from('comments')
       .update(updateData)
