@@ -71,7 +71,21 @@ export default function Home() {
   const [adminPassword, setAdminPassword] = useState('')
   const [currentFilter, setCurrentFilter] = useState('全部')
   const [selectedCategory, setSelectedCategory] = useState('生活')
+  // ── 屏蔽词状态 ──
+  const [badWords, setBadWords] = useState<string[]>([])
   const t = translations[language]
+
+  // ── 获取屏蔽词库 ──
+  const loadBadWords = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('sensitive_words')
+      .select('word')
+    if (error) {
+      console.error('Error loading sensitive words:', error)
+      return
+    }
+    setBadWords((data || []).map((row: { word: string }) => row.word))
+  }, [])
 
   const loadComments = useCallback(async () => {
     let query = supabase.from('comments').select('*')
@@ -86,10 +100,13 @@ export default function Home() {
     setComments(data || [])
   }, [currentFilter])
 
+  // ── 初始化：同时拉取留言和屏蔽词 ──
   useEffect(() => {
     loadComments()
-  }, [loadComments])
+    loadBadWords()
+  }, [loadComments, loadBadWords])
 
+  // ── 留言实时订阅 ──
   useEffect(() => {
     const subscription = supabase
       .channel('public:comments')
@@ -108,6 +125,19 @@ export default function Home() {
       supabase.removeChannel(subscription)
     }
   }, [loadComments, currentFilter])
+
+  // ── 屏蔽词实时订阅 ──
+  useEffect(() => {
+    const subscription = supabase
+      .channel('public:sensitive_words')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sensitive_words' }, () => {
+        loadBadWords()
+      })
+      .subscribe()
+    return () => {
+      supabase.removeChannel(subscription)
+    }
+  }, [loadBadWords])
 
   const calculateHotScore = (comment: Comment) => {
     const now = new Date()
@@ -143,6 +173,15 @@ export default function Home() {
 
   const handlePublish = async () => {
     if (!newComment.trim()) return
+
+    // ── 屏蔽词校验 ──
+    const content = newComment.toLowerCase()
+    const hitWord = badWords.find((word) => content.includes(word.toLowerCase()))
+    if (hitWord) {
+      alert('内容包含违禁词，请文明发言')
+      return
+    }
+
     const { error } = await supabase
       .from('comments')
       .insert([{ content: newComment, category: selectedCategory }])
