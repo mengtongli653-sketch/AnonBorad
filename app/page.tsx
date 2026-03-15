@@ -16,6 +16,7 @@ interface Comment {
   reports: number
   created_at: string
   category: string
+  is_visible?: boolean
 }
 
 interface Translations {
@@ -74,7 +75,52 @@ export default function Home() {
   const [allCategories, setAllCategories] = useState<string[]>([])
   const [customCategory, setCustomCategory] = useState('')
   const [badWords, setBadWords] = useState<string[]>([])
+  const [disabledButtons, setDisabledButtons] = useState<Record<string, { action: 'like' | 'report', disabledUntil: number }>>({})
   const t = translations[language]
+
+  // 生成或获取设备指纹
+  const getUserFingerprint = () => {
+    let fingerprint = localStorage.getItem('user_fingerprint')
+    if (!fingerprint) {
+      fingerprint = crypto.randomUUID()
+      localStorage.setItem('user_fingerprint', fingerprint)
+    }
+    return fingerprint
+  }
+
+  // 检查用户是否在冷却期内
+  const isButtonDisabled = (id: string, action: 'like' | 'report') => {
+    const buttonData = disabledButtons[`${action}_${id}`]
+    if (!buttonData) return false
+    return buttonData.disabledUntil > Date.now()
+  }
+
+  // 检查用户是否已操作过
+  const hasUserActed = (id: string, action: 'like' | 'report') => {
+    const key = `${action}_${id}`
+    return localStorage.getItem(key) === 'true'
+  }
+
+  // 检查操作频率
+  const checkActionFrequency = (action: 'like' | 'report') => {
+    const key = `${action}_actions`
+    const actions = JSON.parse(localStorage.getItem(key) || '[]')
+    const now = Date.now()
+    const oneMinuteAgo = now - 60000 // 1分钟
+    
+    // 过滤掉1分钟前的操作
+    const recentActions = actions.filter((timestamp: number) => timestamp > oneMinuteAgo)
+    
+    if (recentActions.length >= 10) {
+      alert('操作太频繁，请稍后再试')
+      return false
+    }
+    
+    // 添加当前操作时间
+    recentActions.push(now)
+    localStorage.setItem(key, JSON.stringify(recentActions))
+    return true
+  }
 
   const loadComments = useCallback(async () => {
     let query = supabase
@@ -85,6 +131,11 @@ export default function Home() {
       query = query.eq('category', currentFilter)
     }
 
+    // 只加载可见的留言，除非是管理员
+    if (!isAdmin) {
+      query = query.eq('is_visible', true)
+    }
+
     const { data, error } = await query.order('created_at', { ascending: false })
 
     if (error) {
@@ -93,7 +144,7 @@ export default function Home() {
     }
 
     setComments(data || [])
-  }, [currentFilter])
+  }, [currentFilter, isAdmin])
 
   useEffect(() => {
     loadComments()
@@ -262,6 +313,40 @@ export default function Home() {
   }
 
   const handleLike = async (id: string) => {
+    // 检查按钮是否禁用
+    if (isButtonDisabled(id, 'like')) return
+    
+    // 检查用户是否已操作过
+    if (hasUserActed(id, 'like')) return
+    
+    // 检查操作频率
+    if (!checkActionFrequency('like')) return
+    
+    // 设置冷却时间（3秒）
+    const now = Date.now()
+    const disabledUntil = now + 3000
+    setDisabledButtons(prev => ({
+      ...prev,
+      [`like_${id}`]: { action: 'like', disabledUntil }
+    }))
+    
+    // 3秒后自动恢复
+    setTimeout(() => {
+      setDisabledButtons(prev => {
+        const newState = { ...prev }
+        delete newState[`like_${id}`]
+        return newState
+      })
+    }, 3000)
+    
+    // 获取设备指纹
+    const fingerprint = getUserFingerprint()
+    
+    // 后端检查唯一性（这里简化处理，实际应该在后端实现）
+    // 记录操作到localStorage
+    localStorage.setItem(`like_${id}`, 'true')
+    
+    // 更新点赞数
     const { error } = await supabase
       .from('comments')
       .update({ likes: (comments.find(c => c.id === id)?.likes || 0) + 1 })
@@ -269,17 +354,66 @@ export default function Home() {
 
     if (error) {
       console.error('Error liking comment:', error)
+      // 出错时清除记录
+      localStorage.removeItem(`like_${id}`)
     }
   }
 
   const handleReport = async (id: string) => {
+    // 检查按钮是否禁用
+    if (isButtonDisabled(id, 'report')) return
+    
+    // 检查用户是否已操作过
+    if (hasUserActed(id, 'report')) return
+    
+    // 检查操作频率
+    if (!checkActionFrequency('report')) return
+    
+    // 设置冷却时间（3秒）
+    const now = Date.now()
+    const disabledUntil = now + 3000
+    setDisabledButtons(prev => ({
+      ...prev,
+      [`report_${id}`]: { action: 'report', disabledUntil }
+    }))
+    
+    // 3秒后自动恢复
+    setTimeout(() => {
+      setDisabledButtons(prev => {
+        const newState = { ...prev }
+        delete newState[`report_${id}`]
+        return newState
+      })
+    }, 3000)
+    
+    // 获取设备指纹
+    const fingerprint = getUserFingerprint()
+    
+    // 后端检查唯一性（这里简化处理，实际应该在后端实现）
+    // 记录操作到localStorage
+    localStorage.setItem(`report_${id}`, 'true')
+    
+    // 获取当前举报数
+    const comment = comments.find(c => c.id === id)
+    const currentReports = comment?.reports || 0
+    const newReports = currentReports + 1
+    
+    // 检查是否达到举报阈值
+    const updateData: any = { reports: newReports }
+    if (newReports >= 5) {
+      updateData.is_visible = false
+    }
+    
+    // 更新举报数
     const { error } = await supabase
       .from('comments')
-      .update({ reports: (comments.find(c => c.id === id)?.reports || 0) + 1 })
+      .update(updateData)
       .eq('id', id)
 
     if (error) {
       console.error('Error reporting comment:', error)
+      // 出错时清除记录
+      localStorage.removeItem(`report_${id}`)
     }
   }
 
@@ -482,14 +616,24 @@ export default function Home() {
                 <div className="flex gap-4">
                   <button
                     onClick={() => handleLike(comment.id)}
-                    className="text-white hover:text-indigo-300 transition-colors flex items-center gap-1"
+                    disabled={isButtonDisabled(comment.id, 'like') || hasUserActed(comment.id, 'like')}
+                    className={`flex items-center gap-1 transition-colors ${
+                      isButtonDisabled(comment.id, 'like') || hasUserActed(comment.id, 'like')
+                        ? 'text-gray-400 cursor-not-allowed'
+                        : 'text-white hover:text-indigo-300'
+                    }`}
                   >
                     <ThumbsUp size={20} />
                     {comment.likes}
                   </button>
                   <button
                     onClick={() => handleReport(comment.id)}
-                    className="text-white hover:text-red-300 transition-colors flex items-center gap-1"
+                    disabled={isButtonDisabled(comment.id, 'report') || hasUserActed(comment.id, 'report')}
+                    className={`flex items-center gap-1 transition-colors ${
+                      isButtonDisabled(comment.id, 'report') || hasUserActed(comment.id, 'report')
+                        ? 'text-gray-400 cursor-not-allowed'
+                        : 'text-white hover:text-red-300'
+                    }`}
                   >
                     <AlertTriangle size={20} />
                     {comment.reports}
