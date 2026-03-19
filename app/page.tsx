@@ -458,10 +458,15 @@ export default function Home() {
     }
   }
 
-  const handleAdminLogin = () => {
-    if (adminPassword === 'anon123') {
+  const handleAdminLogin = async () => {
+    const { data, error } = await supabase.rpc('check_admin_password', {
+      input_password: adminPassword
+    })
+    if (!error && data === true) {
       setIsAdmin(true)
       setShowAdminModal(false)
+    } else {
+      alert('密码错误')
     }
     setAdminPassword('')
   }
