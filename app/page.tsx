@@ -57,7 +57,7 @@ export default function Home() {
       })())
     : ''
 
-  // 加载留言 + 实时订阅
+  // 加载留言 + 实时订阅（已彻底修复 useEffect 类型错误）
   useEffect(() => {
     const loadComments = async () => {
       const { data } = await supabase
@@ -70,11 +70,15 @@ export default function Home() {
 
     loadComments()
 
-    const channel = supabase.channel('comments')
+    const channel = supabase
+      .channel('comments')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, loadComments)
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    // 清理函数必须是同步的
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   // 加载分类
