@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { Send, ThumbsUp, AlertTriangle, Trash2, Languages } from 'lucide-react'
 import Image from 'next/image'
+import { publishComment, likeComment, reportComment, deleteComment, checkAdminPassword } from './actions'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,54 +19,6 @@ interface Comment {
   created_at: string
   category: string
 }
-
-// ==================== Server Actions（合并在这里）====================
-async function publishComment(formData: FormData) {
-  'use server'
-  const content = formData.get('content') as string
-  const category = formData.get('category') as string
-
-  if (!content?.trim()) throw new Error('留言内容不能为空')
-
-  const { data: badWords } = await supabase.from('sensitive_words').select('word')
-  const hasBadWord = badWords?.some(w => content.toLowerCase().includes(w.word.toLowerCase()))
-  if (hasBadWord) throw new Error('包含敏感词汇，请修改后发布')
-
-  const { error } = await supabase.from('comments').insert([{ content, category }])
-  if (error) throw error
-}
-
-async function likeComment(commentId: string, fingerprint: string) {
-  'use server'
-  await supabase.from('interactions').insert([{
-    comment_id: commentId,
-    user_fingerprint: fingerprint,
-    action: 'like'
-  }])
-  await supabase.rpc('increment_likes', { comment_id: commentId })
-}
-
-async function reportComment(commentId: string, fingerprint: string) {
-  'use server'
-  await supabase.from('interactions').insert([{
-    comment_id: commentId,
-    user_fingerprint: fingerprint,
-    action: 'report'
-  }])
-  await supabase.rpc('increment_reports', { comment_id: commentId })
-}
-
-async function deleteComment(commentId: string) {
-  'use server'
-  await supabase.from('comments').delete().eq('id', commentId)
-}
-
-async function checkAdminPassword(password: string) {
-  'use server'
-  const { data } = await supabase.rpc('check_admin_password', { input_password: password })
-  return data === true
-}
-// ====================================================================
 
 export default function Home() {
   const [comments, setComments] = useState<Comment[]>([])
@@ -86,11 +39,7 @@ export default function Home() {
 
   useEffect(() => {
     const loadComments = async () => {
-      const { data } = await supabase
-        .from('comments')
-        .select('*')
-        .eq('is_hidden', false)
-        .order('created_at', { ascending: false })
+      const { data } = await supabase.from('comments').select('*').eq('is_hidden', false).order('created_at', { ascending: false })
       setComments(data || [])
     }
     loadComments()
@@ -132,9 +81,7 @@ export default function Home() {
     if (success) {
       setIsAdmin(true)
       setShowAdminModal(false)
-    } else {
-      alert('密码错误')
-    }
+    } else alert('密码错误')
     setAdminPassword('')
   }
 
