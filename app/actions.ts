@@ -40,7 +40,6 @@ export async function checkAdminPassword(password: string) {
   return data === true
 }
 
-// 新增：管理员分类管理
 export async function addCategory(name: string) {
   const { error } = await supabase.from('categories').insert([{ name }])
   if (error) throw error

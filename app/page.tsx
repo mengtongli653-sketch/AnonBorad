@@ -41,8 +41,7 @@ export default function Home() {
     hotSort: '最热',
     admin: '管理员',
     noComments: '暂无留言，快来发布第一条吧！',
-    addCategory: '添加新分类',
-    deleteCategory: '删除'
+    addCategory: '添加新分类'
   } : {
     title: 'CWA Anonymous Message Board',
     placeholder: 'Share your thoughts anonymously...',
@@ -51,8 +50,7 @@ export default function Home() {
     hotSort: 'Hot',
     admin: 'Admin',
     noComments: 'No messages yet. Be the first!',
-    addCategory: 'Add Category',
-    deleteCategory: 'Delete'
+    addCategory: 'Add Category'
   }
 
   const fingerprint = typeof window !== 'undefined' 
@@ -63,21 +61,33 @@ export default function Home() {
       })())
     : ''
 
+  // 加载留言 + 实时订阅（已彻底修复类型错误）
   useEffect(() => {
+    let mounted = true
+
     const loadComments = async () => {
+      if (!mounted) return
       setLoading(true)
-      const { data } = await supabase.from('comments').select('*').eq('is_hidden', false).order('created_at', { ascending: false })
-      setComments(data || [])
+      const { data } = await supabase
+        .from('comments')
+        .select('*')
+        .eq('is_hidden', false)
+        .order('created_at', { ascending: false })
+      if (mounted) setComments(data || [])
       setLoading(false)
     }
 
     loadComments()
 
-    const channel = supabase.channel('comments')
+    const channel = supabase
+      .channel('comments')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, loadComments)
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      mounted = false
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   useEffect(() => {
@@ -150,7 +160,12 @@ export default function Home() {
         </div>
 
         <form onSubmit={handlePublish} className="glass rounded-3xl p-8 mb-10">
-          <textarea value={newComment} onChange={e => setNewComment(e.target.value)} placeholder={t.placeholder} className="w-full h-40 bg-white/10 text-white placeholder-white/60 rounded-2xl p-6 focus:outline-none focus:ring-2 focus:ring-white/40 text-lg resize-none" />
+          <textarea
+            value={newComment}
+            onChange={e => setNewComment(e.target.value)}
+            placeholder={t.placeholder}
+            className="w-full h-40 bg-white/10 text-white placeholder-white/60 rounded-2xl p-6 focus:outline-none focus:ring-2 focus:ring-white/40 text-lg resize-none"
+          />
           <div className="flex items-end gap-4 mt-6">
             <select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)} className="flex-1 bg-white/10 text-white rounded-2xl px-6 py-4">
               {allCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
@@ -171,23 +186,28 @@ export default function Home() {
         </div>
 
         <div className="space-y-6">
-          {loading ? <div className="glass rounded-3xl p-12 text-center text-white/70">加载中...</div> : sortedComments.length === 0 ? <div className="glass rounded-3xl p-12 text-center text-white/70">{t.noComments}</div> : sortedComments.map(comment => (
-            <div key={comment.id} className="glass rounded-3xl p-8">
-              <div className="flex justify-between mb-4">
-                <span className="bg-white/20 px-5 py-1 rounded-full text-white text-sm">{comment.category}</span>
-                <span className="text-white/70 text-sm">{new Date(comment.created_at).toLocaleString()}</span>
+          {loading ? (
+            <div className="glass rounded-3xl p-12 text-center text-white/70">加载中...</div>
+          ) : sortedComments.length === 0 ? (
+            <div className="glass rounded-3xl p-12 text-center text-white/70">{t.noComments}</div>
+          ) : (
+            sortedComments.map(comment => (
+              <div key={comment.id} className="glass rounded-3xl p-8">
+                <div className="flex justify-between mb-4">
+                  <span className="bg-white/20 px-5 py-1 rounded-full text-white text-sm">{comment.category}</span>
+                  <span className="text-white/70 text-sm">{new Date(comment.created_at).toLocaleString()}</span>
+                </div>
+                <p className="text-white text-xl leading-relaxed">{comment.content}</p>
+                <div className="flex justify-end gap-8 mt-8 text-white/80">
+                  <button onClick={() => handleLike(comment.id)} className="flex items-center gap-2 hover:text-white"><ThumbsUp size={22} /> {comment.likes}</button>
+                  <button onClick={() => handleReport(comment.id)} className="flex items-center gap-2 hover:text-red-300"><AlertTriangle size={22} /> {comment.reports}</button>
+                  {isAdmin && <button onClick={() => deleteComment(comment.id)} className="text-red-300"><Trash2 size={22} /></button>}
+                </div>
               </div>
-              <p className="text-white text-xl leading-relaxed">{comment.content}</p>
-              <div className="flex justify-end gap-8 mt-8 text-white/80">
-                <button onClick={() => handleLike(comment.id)} className="flex items-center gap-2 hover:text-white"><ThumbsUp size={22} /> {comment.likes}</button>
-                <button onClick={() => handleReport(comment.id)} className="flex items-center gap-2 hover:text-red-300"><AlertTriangle size={22} /> {comment.reports}</button>
-                {isAdmin && <button onClick={() => deleteComment(comment.id)} className="text-red-300"><Trash2 size={22} /></button>}
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
-        {/* 管理员入口 */}
         <button onClick={() => setShowAdminModal(true)} className="fixed bottom-8 right-8 glass px-6 py-3 rounded-2xl text-white text-sm flex items-center gap-2 hover:bg-white/20">
           <Languages size={18} /> {t.admin}
         </button>
@@ -208,7 +228,7 @@ export default function Home() {
                 <>
                   <h2 className="text-2xl font-bold text-white mb-6">分类管理</h2>
                   <div className="flex gap-2 mb-6">
-                    <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder="新分类名称" className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />
+                    <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder={t.addCategory} className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />
                     <button onClick={handleAddCategory} className="px-6 py-4 bg-white text-[#1e3a8a] rounded-2xl"><Plus size={24} /></button>
                   </div>
                   <div className="max-h-96 overflow-auto">
