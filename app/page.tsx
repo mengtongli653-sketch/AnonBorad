@@ -45,7 +45,7 @@ export default function Home() {
     admin: '管理员',
     noComments: '暂无留言，快来发布第一条吧！',
     addCategory: '添加新分类',
-    sensitiveWords: '敏感词管理',
+    sensitiveWords: '敏感词管理'
   } : {
     title: 'CWA Anonymous Message Board',
     placeholder: 'Share your thoughts anonymously...',
@@ -55,21 +55,21 @@ export default function Home() {
     admin: 'Admin',
     noComments: 'No messages yet. Be the first!',
     addCategory: 'Add Category',
-    sensitiveWords: 'Sensitive Words',
+    sensitiveWords: 'Sensitive Words'
   }
 
   const fingerprint = typeof window !== 'undefined' 
-    ? (localStorage.getItem('user_fingerprint') || (() => {
-        const fp = crypto.randomUUID()
-        localStorage.setItem('user_fingerprint', fp)
-        return fp
-      })())
+    ? (localStorage.getItem('user_fingerprint') || crypto.randomUUID()) 
     : ''
 
   useEffect(() => {
     const loadComments = async () => {
       setLoading(true)
-      const { data } = await supabase.from('comments').select('*').eq('is_hidden', false).order('created_at', { ascending: false })
+      const { data } = await supabase
+        .from('comments')
+        .select('*')
+        .eq('is_hidden', false)
+        .order('created_at', { ascending: false })
       setComments(data || [])
       setLoading(false)
     }
@@ -80,7 +80,9 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, loadComments)
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   useEffect(() => {
@@ -91,14 +93,9 @@ export default function Home() {
     loadCategories()
   }, [])
 
-  // 加载敏感词（仅管理员需要）
   useEffect(() => {
     if (isAdmin) {
-      const loadSensitive = async () => {
-        const words = await getSensitiveWords()
-        setSensitiveWords(words.map(w => w.word))
-      }
-      loadSensitive()
+      getSensitiveWords().then(words => setSensitiveWords(words.map(w => w.word)))
     }
   }, [isAdmin])
 
@@ -242,7 +239,6 @@ export default function Home() {
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
             <div className="glass rounded-3xl p-8 w-full max-w-lg max-h-[90vh] overflow-auto">
               {!isAdmin ? (
-                // 登录界面
                 <>
                   <h2 className="text-2xl font-bold text-white mb-6">管理员登录</h2>
                   <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} placeholder="输入密码" className="w-full px-6 py-5 bg-white/10 text-white rounded-2xl mb-6" />
@@ -252,15 +248,13 @@ export default function Home() {
                   </div>
                 </>
               ) : (
-                // 管理面板
                 <>
                   <div className="flex border-b border-white/20 mb-6">
                     <button onClick={() => setAdminTab('category')} className={`flex-1 py-3 ${adminTab === 'category' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>分类管理</button>
-                    <button onClick={() => setAdminTab('sensitive')} className={`flex-1 py-3 ${adminTab === 'sensitive' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>敏感词管理</button>
+                    <button onClick={() => setAdminTab('sensitive')} className={`flex-1 py-3 ${adminTab === 'sensitive' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>{t.sensitiveWords}</button>
                   </div>
 
                   {adminTab === 'category' ? (
-                    // 分类管理
                     <>
                       <div className="flex gap-2 mb-6">
                         <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder={t.addCategory} className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />
@@ -276,7 +270,6 @@ export default function Home() {
                       </div>
                     </>
                   ) : (
-                    // 敏感词管理
                     <>
                       <div className="flex gap-2 mb-6">
                         <input type="text" value={newSensitiveWord} onChange={e => setNewSensitiveWord(e.target.value)} placeholder="新增敏感词" className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />

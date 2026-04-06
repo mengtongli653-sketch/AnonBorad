@@ -51,7 +51,7 @@ export async function deleteCategory(name: string) {
   if (error) throw error
 }
 
-// 敏感词管理（新增）
+// 敏感词管理
 export async function getSensitiveWords() {
   const { data } = await supabase.from('sensitive_words').select('word')
   return data || []
