@@ -210,7 +210,7 @@ export default function Home() {
             <select 
               value={selectedCategory} 
               onChange={e => setSelectedCategory(e.target.value)} 
-              className="flex-1 bg-white/10 text-white rounded-2xl px-6 py-4"
+              className="flex-1 bg-white/10 text-white rounded-2xl px-6 py-4 appearance-none focus:outline-none focus:ring-2 focus:ring-white/30 cursor-pointer"
             >
               {allCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
