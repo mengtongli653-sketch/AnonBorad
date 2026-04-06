@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { Send, ThumbsUp, AlertTriangle, Trash2, Clock, Flame, Languages, Plus, X } from 'lucide-react'
 import Image from 'next/image'
-import { publishComment, likeComment, reportComment, deleteComment, checkAdminPassword, addCategory, deleteCategory } from './actions'
+import { publishComment, likeComment, reportComment, deleteComment, checkAdminPassword, addCategory, deleteCategory, getSensitiveWords, addSensitiveWord, deleteSensitiveWord } from './actions'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,6 +25,7 @@ export default function Home() {
   const [newComment, setNewComment] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('生活')
   const [allCategories, setAllCategories] = useState<string[]>([])
+  const [sensitiveWords, setSensitiveWords] = useState<string[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [showAdminModal, setShowAdminModal] = useState(false)
   const [adminPassword, setAdminPassword] = useState('')
@@ -32,6 +33,8 @@ export default function Home() {
   const [sortBy, setSortBy] = useState<'time' | 'hot'>('time')
   const [loading, setLoading] = useState(true)
   const [newCategoryName, setNewCategoryName] = useState('')
+  const [newSensitiveWord, setNewSensitiveWord] = useState('')
+  const [adminTab, setAdminTab] = useState<'category' | 'sensitive'>('category')
 
   const t = language === 'zh' ? {
     title: 'CWA 匿名留言板',
@@ -41,7 +44,8 @@ export default function Home() {
     hotSort: '最热',
     admin: '管理员',
     noComments: '暂无留言，快来发布第一条吧！',
-    addCategory: '添加新分类'
+    addCategory: '添加新分类',
+    sensitiveWords: '敏感词管理',
   } : {
     title: 'CWA Anonymous Message Board',
     placeholder: 'Share your thoughts anonymously...',
@@ -50,7 +54,8 @@ export default function Home() {
     hotSort: 'Hot',
     admin: 'Admin',
     noComments: 'No messages yet. Be the first!',
-    addCategory: 'Add Category'
+    addCategory: 'Add Category',
+    sensitiveWords: 'Sensitive Words',
   }
 
   const fingerprint = typeof window !== 'undefined' 
@@ -61,33 +66,21 @@ export default function Home() {
       })())
     : ''
 
-  // 加载留言 + 实时订阅（已彻底修复类型错误）
   useEffect(() => {
-    let mounted = true
-
     const loadComments = async () => {
-      if (!mounted) return
       setLoading(true)
-      const { data } = await supabase
-        .from('comments')
-        .select('*')
-        .eq('is_hidden', false)
-        .order('created_at', { ascending: false })
-      if (mounted) setComments(data || [])
+      const { data } = await supabase.from('comments').select('*').eq('is_hidden', false).order('created_at', { ascending: false })
+      setComments(data || [])
       setLoading(false)
     }
 
     loadComments()
 
-    const channel = supabase
-      .channel('comments')
+    const channel = supabase.channel('comments')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, loadComments)
       .subscribe()
 
-    return () => {
-      mounted = false
-      supabase.removeChannel(channel)
-    }
+    return () => supabase.removeChannel(channel)
   }, [])
 
   useEffect(() => {
@@ -97,6 +90,17 @@ export default function Home() {
     }
     loadCategories()
   }, [])
+
+  // 加载敏感词（仅管理员需要）
+  useEffect(() => {
+    if (isAdmin) {
+      const loadSensitive = async () => {
+        const words = await getSensitiveWords()
+        setSensitiveWords(words.map(w => w.word))
+      }
+      loadSensitive()
+    }
+  }, [isAdmin])
 
   const sortedComments = [...comments].sort((a, b) => {
     if (sortBy === 'hot') return (b.likes + b.reports * 0.5) - (a.likes + a.reports * 0.5)
@@ -125,7 +129,6 @@ export default function Home() {
     if (success) setIsAdmin(true)
     else alert('密码错误')
     setAdminPassword('')
-    setShowAdminModal(false)
   }
 
   const handleAddCategory = async () => {
@@ -146,6 +149,29 @@ export default function Home() {
       await deleteCategory(name)
       const { data } = await supabase.from('categories').select('name')
       setAllCategories(data?.map(c => c.name) || [])
+    } catch (err: any) {
+      alert(err.message || '删除失败')
+    }
+  }
+
+  const handleAddSensitiveWord = async () => {
+    if (!newSensitiveWord.trim()) return
+    try {
+      await addSensitiveWord(newSensitiveWord.trim())
+      setNewSensitiveWord('')
+      const words = await getSensitiveWords()
+      setSensitiveWords(words.map(w => w.word))
+    } catch (err: any) {
+      alert(err.message || '添加失败')
+    }
+  }
+
+  const handleDeleteSensitiveWord = async (word: string) => {
+    if (!confirm(`确定删除敏感词 "${word}" 吗？`)) return
+    try {
+      await deleteSensitiveWord(word)
+      const words = await getSensitiveWords()
+      setSensitiveWords(words.map(w => w.word))
     } catch (err: any) {
       alert(err.message || '删除失败')
     }
@@ -213,9 +239,10 @@ export default function Home() {
         </button>
 
         {showAdminModal && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-            <div className="glass rounded-3xl p-8 w-full max-w-md">
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="glass rounded-3xl p-8 w-full max-w-lg max-h-[90vh] overflow-auto">
               {!isAdmin ? (
+                // 登录界面
                 <>
                   <h2 className="text-2xl font-bold text-white mb-6">管理员登录</h2>
                   <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} placeholder="输入密码" className="w-full px-6 py-5 bg-white/10 text-white rounded-2xl mb-6" />
@@ -225,21 +252,48 @@ export default function Home() {
                   </div>
                 </>
               ) : (
+                // 管理面板
                 <>
-                  <h2 className="text-2xl font-bold text-white mb-6">分类管理</h2>
-                  <div className="flex gap-2 mb-6">
-                    <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder={t.addCategory} className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />
-                    <button onClick={handleAddCategory} className="px-6 py-4 bg-white text-[#1e3a8a] rounded-2xl"><Plus size={24} /></button>
+                  <div className="flex border-b border-white/20 mb-6">
+                    <button onClick={() => setAdminTab('category')} className={`flex-1 py-3 ${adminTab === 'category' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>分类管理</button>
+                    <button onClick={() => setAdminTab('sensitive')} className={`flex-1 py-3 ${adminTab === 'sensitive' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>敏感词管理</button>
                   </div>
-                  <div className="max-h-96 overflow-auto">
-                    {allCategories.map(cat => (
-                      <div key={cat} className="flex justify-between items-center py-3 border-b border-white/10">
-                        <span className="text-white">{cat}</span>
-                        <button onClick={() => handleDeleteCategory(cat)} className="text-red-400 hover:text-red-300"><X size={20} /></button>
+
+                  {adminTab === 'category' ? (
+                    // 分类管理
+                    <>
+                      <div className="flex gap-2 mb-6">
+                        <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder={t.addCategory} className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />
+                        <button onClick={handleAddCategory} className="px-6 py-4 bg-white text-[#1e3a8a] rounded-2xl"><Plus size={24} /></button>
                       </div>
-                    ))}
-                  </div>
-                  <button onClick={() => { setIsAdmin(false); setShowAdminModal(false) }} className="w-full mt-6 glass text-white py-4 rounded-2xl">退出管理</button>
+                      <div className="max-h-80 overflow-auto">
+                        {allCategories.map(cat => (
+                          <div key={cat} className="flex justify-between items-center py-3 border-b border-white/10">
+                            <span className="text-white">{cat}</span>
+                            <button onClick={() => handleDeleteCategory(cat)} className="text-red-400 hover:text-red-300"><X size={20} /></button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    // 敏感词管理
+                    <>
+                      <div className="flex gap-2 mb-6">
+                        <input type="text" value={newSensitiveWord} onChange={e => setNewSensitiveWord(e.target.value)} placeholder="新增敏感词" className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />
+                        <button onClick={handleAddSensitiveWord} className="px-6 py-4 bg-white text-[#1e3a8a] rounded-2xl"><Plus size={24} /></button>
+                      </div>
+                      <div className="max-h-80 overflow-auto">
+                        {sensitiveWords.map(word => (
+                          <div key={word} className="flex justify-between items-center py-3 border-b border-white/10">
+                            <span className="text-white">{word}</span>
+                            <button onClick={() => handleDeleteSensitiveWord(word)} className="text-red-400 hover:text-red-300"><X size={20} /></button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  <button onClick={() => { setIsAdmin(false); setShowAdminModal(false) }} className="w-full mt-8 glass text-white py-4 rounded-2xl">退出管理</button>
                 </>
               )}
             </div>

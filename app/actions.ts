@@ -40,6 +40,7 @@ export async function checkAdminPassword(password: string) {
   return data === true
 }
 
+// 分类管理
 export async function addCategory(name: string) {
   const { error } = await supabase.from('categories').insert([{ name }])
   if (error) throw error
@@ -47,5 +48,21 @@ export async function addCategory(name: string) {
 
 export async function deleteCategory(name: string) {
   const { error } = await supabase.from('categories').delete().eq('name', name)
+  if (error) throw error
+}
+
+// 敏感词管理（新增）
+export async function getSensitiveWords() {
+  const { data } = await supabase.from('sensitive_words').select('word')
+  return data || []
+}
+
+export async function addSensitiveWord(word: string) {
+  const { error } = await supabase.from('sensitive_words').insert([{ word }])
+  if (error) throw error
+}
+
+export async function deleteSensitiveWord(word: string) {
+  const { error } = await supabase.from('sensitive_words').delete().eq('word', word)
   if (error) throw error
 }
