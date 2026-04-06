@@ -4,7 +4,18 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { Send, ThumbsUp, AlertTriangle, Trash2, Clock, Flame, Languages, Plus, X } from 'lucide-react'
 import Image from 'next/image'
-import { publishComment, likeComment, reportComment, deleteComment, checkAdminPassword, addCategory, deleteCategory, getSensitiveWords, addSensitiveWord, deleteSensitiveWord } from './actions'
+import { 
+  publishComment, 
+  likeComment, 
+  reportComment, 
+  deleteComment, 
+  checkAdminPassword, 
+  addCategory, 
+  deleteCategory, 
+  getSensitiveWords, 
+  addSensitiveWord, 
+  deleteSensitiveWord 
+} from './actions'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,6 +46,7 @@ export default function Home() {
   const [newCategoryName, setNewCategoryName] = useState('')
   const [newSensitiveWord, setNewSensitiveWord] = useState('')
   const [adminTab, setAdminTab] = useState<'category' | 'sensitive'>('category')
+  const [error, setError] = useState('')
 
   const t = language === 'zh' ? {
     title: 'CWA 匿名留言板',
@@ -63,15 +75,23 @@ export default function Home() {
     : ''
 
   useEffect(() => {
+    let mounted = true
+
     const loadComments = async () => {
+      if (!mounted) return
       setLoading(true)
-      const { data } = await supabase
-        .from('comments')
-        .select('*')
-        .eq('is_hidden', false)
-        .order('created_at', { ascending: false })
-      setComments(data || [])
-      setLoading(false)
+      setError('')
+      try {
+        const { data } = await supabase
+          .from('comments')
+          .select('*')
+          .eq('is_hidden', false)
+          .order('created_at', { ascending: false })
+        if (mounted) setComments(data || [])
+      } catch {
+        if (mounted) setError('加载失败，请检查 Supabase 配置')
+      }
+      if (mounted) setLoading(false)
     }
 
     loadComments()
@@ -81,6 +101,7 @@ export default function Home() {
       .subscribe()
 
     return () => {
+      mounted = false
       supabase.removeChannel(channel)
     }
   }, [])
@@ -222,8 +243,12 @@ export default function Home() {
                 </div>
                 <p className="text-white text-xl leading-relaxed">{comment.content}</p>
                 <div className="flex justify-end gap-8 mt-8 text-white/80">
-                  <button onClick={() => handleLike(comment.id)} className="flex items-center gap-2 hover:text-white"><ThumbsUp size={22} /> {comment.likes}</button>
-                  <button onClick={() => handleReport(comment.id)} className="flex items-center gap-2 hover:text-red-300"><AlertTriangle size={22} /> {comment.reports}</button>
+                  <button onClick={() => handleLike(comment.id)} className="flex items-center gap-2 hover:text-white">
+                    <ThumbsUp size={22} /> {comment.likes}
+                  </button>
+                  <button onClick={() => handleReport(comment.id)} className="flex items-center gap-2 hover:text-red-300">
+                    <AlertTriangle size={22} /> {comment.reports}
+                  </button>
                   {isAdmin && <button onClick={() => deleteComment(comment.id)} className="text-red-300"><Trash2 size={22} /></button>}
                 </div>
               </div>
