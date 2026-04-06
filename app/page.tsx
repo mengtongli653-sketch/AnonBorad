@@ -45,7 +45,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [newSensitiveWord, setNewSensitiveWord] = useState('')
-  const [adminTab, setAdminTab] = useState<'comments' | 'category' | 'sensitive'>('comments') // 默认显示留言管理
+  const [adminTab, setAdminTab] = useState<'comments' | 'category' | 'sensitive'>('comments')
 
   const t = language === 'zh' ? {
     title: 'CWA 匿名留言板',
@@ -76,14 +76,17 @@ export default function Home() {
     : ''
 
   useEffect(() => {
+    let mounted = true
+
     const loadComments = async () => {
+      if (!mounted) return
       setLoading(true)
       const { data } = await supabase
         .from('comments')
         .select('*')
         .eq('is_hidden', false)
         .order('created_at', { ascending: false })
-      setComments(data || [])
+      if (mounted) setComments(data || [])
       setLoading(false)
     }
 
@@ -93,7 +96,10 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, loadComments)
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      mounted = false
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   useEffect(() => {
@@ -204,7 +210,7 @@ export default function Home() {
             <select 
               value={selectedCategory} 
               onChange={e => setSelectedCategory(e.target.value)} 
-              className="flex-1 bg-white/10 text-white rounded-2xl px-6 py-4 focus:outline-none"
+              className="flex-1 bg-white/10 text-white rounded-2xl px-6 py-4"
             >
               {allCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
@@ -254,7 +260,6 @@ export default function Home() {
           <Languages size={18} /> {t.admin}
         </button>
 
-        {/* 管理员面板 */}
         {showAdminModal && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
             <div className="glass rounded-3xl p-8 w-full max-w-2xl max-h-[90vh] overflow-auto">
@@ -275,7 +280,6 @@ export default function Home() {
                     <button onClick={() => setAdminTab('sensitive')} className={`flex-1 py-3 ${adminTab === 'sensitive' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>{t.sensitiveWords}</button>
                   </div>
 
-                  {/* 留言管理 */}
                   {adminTab === 'comments' && (
                     <div className="space-y-4 max-h-[60vh] overflow-auto">
                       {sortedComments.map(comment => (
@@ -292,7 +296,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* 分类管理 */}
                   {adminTab === 'category' && (
                     <>
                       <div className="flex gap-2 mb-6">
@@ -310,7 +313,6 @@ export default function Home() {
                     </>
                   )}
 
-                  {/* 敏感词管理 */}
                   {adminTab === 'sensitive' && (
                     <>
                       <div className="flex gap-2 mb-6">
