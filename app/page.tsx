@@ -45,8 +45,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [newSensitiveWord, setNewSensitiveWord] = useState('')
-  const [adminTab, setAdminTab] = useState<'category' | 'sensitive'>('category')
-  const [error, setError] = useState('')
+  const [adminTab, setAdminTab] = useState<'comments' | 'category' | 'sensitive'>('comments') // 默认显示留言管理
 
   const t = language === 'zh' ? {
     title: 'CWA 匿名留言板',
@@ -57,7 +56,8 @@ export default function Home() {
     admin: '管理员',
     noComments: '暂无留言，快来发布第一条吧！',
     addCategory: '添加新分类',
-    sensitiveWords: '敏感词管理'
+    sensitiveWords: '敏感词管理',
+    manageComments: '留言管理'
   } : {
     title: 'CWA Anonymous Message Board',
     placeholder: 'Share your thoughts anonymously...',
@@ -67,7 +67,8 @@ export default function Home() {
     admin: 'Admin',
     noComments: 'No messages yet. Be the first!',
     addCategory: 'Add Category',
-    sensitiveWords: 'Sensitive Words'
+    sensitiveWords: 'Sensitive Words',
+    manageComments: 'Manage Comments'
   }
 
   const fingerprint = typeof window !== 'undefined' 
@@ -75,23 +76,15 @@ export default function Home() {
     : ''
 
   useEffect(() => {
-    let mounted = true
-
     const loadComments = async () => {
-      if (!mounted) return
       setLoading(true)
-      setError('')
-      try {
-        const { data } = await supabase
-          .from('comments')
-          .select('*')
-          .eq('is_hidden', false)
-          .order('created_at', { ascending: false })
-        if (mounted) setComments(data || [])
-      } catch {
-        if (mounted) setError('加载失败，请检查 Supabase 配置')
-      }
-      if (mounted) setLoading(false)
+      const { data } = await supabase
+        .from('comments')
+        .select('*')
+        .eq('is_hidden', false)
+        .order('created_at', { ascending: false })
+      setComments(data || [])
+      setLoading(false)
     }
 
     loadComments()
@@ -100,10 +93,7 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, loadComments)
       .subscribe()
 
-    return () => {
-      mounted = false
-      supabase.removeChannel(channel)
-    }
+    return () => supabase.removeChannel(channel)
   }, [])
 
   useEffect(() => {
@@ -211,7 +201,11 @@ export default function Home() {
             className="w-full h-40 bg-white/10 text-white placeholder-white/60 rounded-2xl p-6 focus:outline-none focus:ring-2 focus:ring-white/40 text-lg resize-none"
           />
           <div className="flex items-end gap-4 mt-6">
-            <select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)} className="flex-1 bg-white/10 text-white rounded-2xl px-6 py-4">
+            <select 
+              value={selectedCategory} 
+              onChange={e => setSelectedCategory(e.target.value)} 
+              className="flex-1 bg-white/10 text-white rounded-2xl px-6 py-4 focus:outline-none"
+            >
               {allCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
             <button type="submit" className="px-12 py-4 bg-white text-[#1e3a8a] font-semibold rounded-2xl flex items-center gap-3 hover:bg-white/90">
@@ -260,9 +254,10 @@ export default function Home() {
           <Languages size={18} /> {t.admin}
         </button>
 
+        {/* 管理员面板 */}
         {showAdminModal && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-            <div className="glass rounded-3xl p-8 w-full max-w-lg max-h-[90vh] overflow-auto">
+            <div className="glass rounded-3xl p-8 w-full max-w-2xl max-h-[90vh] overflow-auto">
               {!isAdmin ? (
                 <>
                   <h2 className="text-2xl font-bold text-white mb-6">管理员登录</h2>
@@ -275,11 +270,30 @@ export default function Home() {
               ) : (
                 <>
                   <div className="flex border-b border-white/20 mb-6">
-                    <button onClick={() => setAdminTab('category')} className={`flex-1 py-3 ${adminTab === 'category' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>分类管理</button>
+                    <button onClick={() => setAdminTab('comments')} className={`flex-1 py-3 ${adminTab === 'comments' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>{t.manageComments}</button>
+                    <button onClick={() => setAdminTab('category')} className={`flex-1 py-3 ${adminTab === 'category' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>{t.addCategory}</button>
                     <button onClick={() => setAdminTab('sensitive')} className={`flex-1 py-3 ${adminTab === 'sensitive' ? 'border-b-2 border-white text-white' : 'text-white/60'}`}>{t.sensitiveWords}</button>
                   </div>
 
-                  {adminTab === 'category' ? (
+                  {/* 留言管理 */}
+                  {adminTab === 'comments' && (
+                    <div className="space-y-4 max-h-[60vh] overflow-auto">
+                      {sortedComments.map(comment => (
+                        <div key={comment.id} className="glass rounded-2xl p-4 flex justify-between items-center">
+                          <div className="flex-1">
+                            <span className="text-white/70 text-xs">{comment.category}</span>
+                            <p className="text-white text-base">{comment.content}</p>
+                          </div>
+                          <button onClick={() => deleteComment(comment.id)} className="text-red-400 hover:text-red-300 px-4 py-2">
+                            <Trash2 size={20} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 分类管理 */}
+                  {adminTab === 'category' && (
                     <>
                       <div className="flex gap-2 mb-6">
                         <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder={t.addCategory} className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />
@@ -294,7 +308,10 @@ export default function Home() {
                         ))}
                       </div>
                     </>
-                  ) : (
+                  )}
+
+                  {/* 敏感词管理 */}
+                  {adminTab === 'sensitive' && (
                     <>
                       <div className="flex gap-2 mb-6">
                         <input type="text" value={newSensitiveWord} onChange={e => setNewSensitiveWord(e.target.value)} placeholder="新增敏感词" className="flex-1 px-6 py-4 bg-white/10 text-white rounded-2xl" />
